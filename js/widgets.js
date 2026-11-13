@@ -373,7 +373,9 @@
     let anim = 0;
     function set(v, push = true) {
       input.value = Math.round(v);
-      outEl.textContent = `${input.value} %`;
+      // staged sets name the stage the slider is in (first half: modules, second half: parts)
+      const st = root.dataset.stages && root.dataset.stages.split('|');
+      outEl.textContent = st && v > 0 ? `${input.value} % · ${st[Math.max(0, Math.ceil((v / 100) * st.length) - 1)]}` : `${input.value} %`;
       btn.textContent = v > 50 ? 'Collapse' : 'Explode';
       btn.setAttribute('aria-pressed', String(v > 50));
       if (push && window.SW) window.SW.explode(name, v / 100);

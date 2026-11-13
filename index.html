@@ -644,9 +644,9 @@ footer.colophon { font-size: var(--step--1); color: var(--muted); border-top: 1p
       <p>The current release uses the Voron StealthBurner toolhead with a Clockwork 2 extruder (older revisions used the Afterburner). Its job is to push filament at a controlled rate, melt it in a small, well-defined zone and freeze it again the instant it leaves the nozzle, while staying as light as possible because it rides the CoreXZ gantry.</p>
 
       <h3><span class="num">7.1</span>What is on the toolhead</h3>
-      <div class="explode" data-explode="toolhead">
+      <div class="explode" data-explode="toolhead" data-stages="modules|every part">
         <button type="button" aria-pressed="false" aria-controls="xp-toolhead">Explode</button>
-        <label for="xp-toolhead"><span>Pull the toolhead apart</span><output for="xp-toolhead">0 %</output></label>
+        <label for="xp-toolhead"><span>Pull the toolhead apart: modules first, then every part</span><output for="xp-toolhead">0 %</output></label>
         <input type="range" id="xp-toolhead" min="0" max="100" step="1" value="0">
       </div>
       <div class="table-wrap"><table>
@@ -768,7 +768,7 @@ footer.colophon { font-size: var(--step--1); color: var(--muted); border-top: 1p
       <p>X and Y home against microswitches wired through the common and normally-closed contacts: the circuit is closed in normal operation and opens when pressed. A broken wire also opens it, so the firmware sees "triggered" and stops instead of driving the axis into the frame. Repeatability, often a few microns, comes from the snap-action spring blade flipping over centre at a fixed force. Y can instead home sensorlessly using the TMC2209's StallGuard; the config includes it as a commented option.</p>
 
       <h3><span class="num">8.6</span>The inductive probe and Z</h3>
-      <p>Z has no endstop switch. It homes, and the bed is meshed, with an inductive probe on the toolhead (the manual pictures a PL-08N and recommends an Omron TL-Q5MC). The probe drives an LC oscillator; near a conductor its field induces eddy currents that dissipate energy and damp the oscillation, and past a threshold the output switches. The physics explains its quirks:</p>
+      <p>Z has no endstop switch. It homes, and the bed is meshed, with an inductive probe on the toolhead (the manual pictures a PL-08N and recommends an Omron TL-Q5MC). The probe drives an LC oscillator; near a conductor its field induces eddy currents that dissipate energy and damp the oscillation, and past a threshold the output switches. The physics explains its quirks: <button class="view-link" type="button" data-show="PL-08N v3 (1):1" data-label="PL-08N inductive probe on the X carriage">Show the probe</button></p>
       <ul>
         <li><strong>Material dependence.</strong> Trigger distance depends on the target's conductivity and permeability; steel triggers farther than aluminium, so changing sheets can change the Z offset.</li>
         <li><strong>Temperature drift.</strong> Coil resistance and oscillator parameters drift as toolhead and bed warm. Probe at operating temperature.</li>

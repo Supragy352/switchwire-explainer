@@ -325,7 +325,10 @@
   function place() {
     for (const [o, e] of expl) o.position.copy(e.base);
     for (const m of movers) m.o.position.copy(m.base).addScaledVector(m.unit, pose[m.axis]);
-    for (const [o, e] of expl) if (o.matrixAutoUpdate) o.position.addScaledVector(e.off, explodeT);
+    // staged sets play their stages one after another along the slider
+    const S = explStages, f = (k) => Math.max(0, Math.min(1, explodeT * S - k));
+    for (const [, e] of expl) { e.cur.set(0, 0, 0); e.offs.forEach((v, k) => e.cur.addScaledVector(v, f(k))); }
+    for (const [o, e] of expl) if (o.matrixAutoUpdate) o.position.add(e.cur);
     // belt displacement per motor (CoreXZ: a = X + Z, b = X - Z) -> pulley angle = s / r
     const travel = { a: pose.x + pose.z, b: pose.x - pose.z, y: -pose.y };
     const T = new THREE.Matrix4(), Rm = new THREE.Matrix4(), Ti = new THREE.Matrix4();
@@ -335,7 +338,7 @@
       Rm.makeRotationAxis(s.axis, travel[s.key] / R);
       s.o.matrix.copy(T).multiply(Rm).multiply(Ti).multiply(s.base);
       const e = expl.get(s.o); // spinners have matrixAutoUpdate off, so explode them through the matrix
-      if (e) { const m = s.o.matrix.elements; m[12] += e.off.x * explodeT; m[13] += e.off.y * explodeT; m[14] += e.off.z * explodeT; }
+      if (e) { const m = s.o.matrix.elements; m[12] += e.cur.x; m[13] += e.cur.y; m[14] += e.cur.z; }
     }
     updateBelts();
     belts.group.visible = explodeT === 0; // belts are drawn from pulley positions an explosion breaks
@@ -345,14 +348,37 @@
 
   // ---------- exploded views ----------
   // Offsets in Fusion cm at full explosion, along Fusion axes. A child's offset adds to its parent's.
+  // A set is one stage, or an array of stages played in order (the toolhead: modules, then their parts).
+  // '@fasteners' moves every screw, nut and washer inside the named parts out along its own long axis.
   const EXPLODE = {
-    toolhead: {
-      'Stealthburner_Assembly:1': [0, -6, 0], 'Stealthburner_Fans:1': [0, -2, 0], 'LEDs:1': [0, -2.5, 0],
-      'SB TOOLHEAD-Revo Voron:1': [0, -2.5, 0], 'Toolhead Revo Voron Front:1': [0, -2.5, 0],
-      'P6 Assembly (RevC):1': [0, 0, -5], 'PTFE Tube Revo Voron 29.8:1': [0, 0, 2.5],
-      'CW2_Assembly:1': [0, 0, 6], 'LDO-36STH20:1': [0, 3, 2], 'BMG_Extruder_Hardware:1': [0, -2.5, 0],
-      'ADXL_Assembly - Generic:1': [-5, -3, -3],
-    },
+    toolhead: [{
+      'Stealthburner_Assembly:1': [0, -10, 0], 'Stealthburner_Fans:1': [0, -3, 0], 'LEDs:1': [0, -3.5, 0],
+      'SB TOOLHEAD-Revo Voron:1': [0, -4, 0], 'Toolhead Revo Voron Front:1': [0, -3, 0],
+      'P6 Assembly (RevC):1': [0, 0, -7], 'PTFE Tube Revo Voron 29.8:1': [0, 0, 3],
+      'CW2_Assembly:1': [0, 0, 9], 'LDO-36STH20:1': [0, 4, 2], 'BMG_Extruder_Hardware:1': [0, -3.5, 0],
+      'ADXL_Assembly - Generic:1': [-7, -4, -4],
+    }, {
+      // StealthBurner: fans, logo LED stack and the shell's long screws
+      '5015 Fan:1': [0, -1.5, 2.5], 'turbine (1):1': [0, -2, 0], '4010 Axial Fan:1': [0, -2.5, -1],
+      'Logo_Led:1': [0, -1.5, 0], 'LED_Diffuser:1': [0, -1.5, 0], 'LED_Diffuser_Mask:1': [0, -0.8, 0], 'rgbw_led_pcb:1': [0, 0.6, 0],
+      'rgbw_led_pcb:2': [-1, -1, -1.5], 'rgbw_led_pcb:3': [1, -1, -1.5],
+      // hotend: Revo core and spring drop out of the heatsink
+      'Toolhead Revo Voron Front:1': [0, -2, 0], 'V7_wo_fanV7_Fitment_CAD_wo_fan_1.3:1': [0, 0, -3.5], 'Revo Spring:1': [0, 0, -1.5],
+      'PTFE Tube Revo Voron 29.8:1': [0, 0, 2],
+      // Clockwork 2: body, latch and guides off the motor plate; the BMG gear train opens up
+      'LDO-36STH20:1': [0, 2.5, 0], 'Main_Body:1': [0, -2.5, 0], 'Latch:1': [-1.5, -3, 2.5],
+      'Guilder_A:1': [-3, -3, 0], 'Guilder_B:1': [-3, -4.5, 0], 'Shuttle:1': [0, -3.5, 2.5],
+      'Cable_Cover:1': [3.5, 0, 0], 'Cable_Cover_For_PCB:1': [3.5, 0, 0], 'PCB_Spacer:1': [2, 0, 0], 'Chain_Anchors:1': [0, 3, 0],
+      'BMG_Drive_Gear_Assembly:1': [2.5, -2.5, 0], 'MR825 Ballbearing 5x8x2:1': [0, -1.5, 0], 'MR825 Ballbearing 5x8x2:2': [0, 1.5, 0],
+      'Drive_Gear:1': [0, -1, 0], 'BMG_Idler_Gear_Assembly:1': [-2, -2.5, -1.5], '3mmx20mm_Shaft:1': [0, -2, 0],
+      'Needle_Bearings:1': [0, -1, 0], 'Needle_Bearings:2': [0, 0.8, 0], 'Spring Assembly:1': [-2.5, -2, 2.5],
+      // X carriage: the two halves split, the probe drops, belt clips and endstop come off
+      'SW_Carriage_Left:1': [-2.5, 0, 0], 'SW_Carriage_Right:1': [2.5, 0, 0], 'sw_x_bearing_block:1': [0, -2.5, 0],
+      'PL-08N v3 (1):1': [0, -2, -5], 'Belt Clip (1):1': [1.5, 2.5, 0], 'Belt Clip (1) (1):1': [-1.5, 2.5, 0],
+      'KW10 Microswitch v2 v1 (1):1': [3.5, 0, -1],
+      'asxl345_sensor_generic:1': [-1.5, 0, -1], 'ADXL_Printed:1': [-1, -1, 0],
+      '@fasteners': { in: ['Stealthburner_Hardware:1', 'SB TOOLHEAD-Revo Voron:1', 'CW2_hardware:1', 'X_Carriage:1', 'ADXL_Hardware:1'], dist: 2.5 },
+    }],
     idler: {
       // two idler stacks on one M5 bolt: lift them out of the block, then spread along the shaft
       'M5 1mm Spacer:5': [0, -3.3, 5], 'F695-2RS v1 (1):3': [0, -2.4, 5], 'F695-2RS v1 (2):3': [0, -1.2, 5],
@@ -398,20 +424,47 @@
   };
   const ebase = new Map(); // object -> its unexploded local position
   const expl = new Map();  // object -> { base, off (local, at t = 1) } for the active set
-  let exploded = null, explodeT = 0;
+  let exploded = null, explodeT = 0, explStages = 1;
+  const FASTENER = /SHCS|BHCS|FHCS|Screw|Nut|Washer|DIN /;
+  // Each fastener under c (not threaded inserts, which stay in the plastic), with a world unit vector
+  // along its longest side pointing away from c's centre: the direction it would be unscrewed.
+  function fasteners(c) {
+    const centre = new THREE.Box3().setFromObject(c).getCenter(new THREE.Vector3()), out = [];
+    (function walk(o) {
+      for (const ch of o.children) {
+        if (ch.userData.fname && FASTENER.test(ch.userData.fname)) {
+          const b = new THREE.Box3().setFromObject(ch), size = b.getSize(new THREE.Vector3());
+          const ax = size.x >= size.y && size.x >= size.z ? 'x' : size.y >= size.z ? 'y' : 'z';
+          const dir = new THREE.Vector3(); dir[ax] = Math.sign(b.getCenter(new THREE.Vector3())[ax] - centre[ax]) || 1;
+          out.push([ch, dir]);
+        } else walk(ch);
+      }
+    })(c);
+    return out;
+  }
   function explode(name, t) {
     if (!root) { readyCbs.push(() => explode(name, t)); return; }
     const def = EXPLODE[name];
     if (!def) return;
     if (exploded !== name) {
-      explodeT = 0; place(); // settle the previous set at its base before measuring
+      collapse(); // settle the previous set at its base (and reset its slider) before measuring
       expl.clear();
-      for (const [n, v] of Object.entries(def)) for (const o of named(n)) {
-        if (!ebase.has(o)) ebase.set(o, o.position.clone());
+      const stages = Array.isArray(def) ? def : [def];
+      explStages = stages.length;
+      const add = (o, k, world) => { // world: displacement in three.js metres
+        if (!expl.has(o)) {
+          if (!ebase.has(o)) ebase.set(o, o.position.clone());
+          expl.set(o, { base: ebase.get(o), offs: stages.map(() => new THREE.Vector3()), cur: new THREE.Vector3() });
+        }
         const p = o.parent, w0 = o.getWorldPosition(new THREE.Vector3());
-        const off = p.worldToLocal(w0.clone().add(F(...v))).sub(p.worldToLocal(w0.clone()));
-        expl.set(o, { base: ebase.get(o), off });
-      }
+        expl.get(o).offs[k].add(p.worldToLocal(w0.clone().add(world)).sub(p.worldToLocal(w0.clone())));
+      };
+      stages.forEach((st, k) => {
+        for (const [n, v] of Object.entries(st)) {
+          if (n === '@fasteners') v.in.flatMap(named).forEach((c) => fasteners(c).forEach(([o, dir]) => add(o, k, dir.multiplyScalar(v.dist / 100))));
+          else named(n).forEach((o) => add(o, k, F(...v)));
+        }
+      });
       exploded = name;
     }
     if (currentView !== 'x-' + name) view('x-' + name); // also after a collapse sent the camera elsewhere
@@ -443,7 +496,7 @@
     electronics:   { cam: [32, -60, 62], at: [0, -9, 3], hide: [...GROUPS_HIDDEN_OPEN, 'Y Axis Assembly:1', '10x11 Chain Y:1'], focus: ['Electronics:1'], label: 'Electronics bay under the bed (S18)' },
     chains:        { cam: [-75, 110, 60], at: [0, 0, 20], hide: GROUPS_HIDDEN_OPEN, focus: ['10x11 Chain'], label: 'Cable chains from the rear (S20)' },
     // exploded views (camera framed for the parts at full explosion)
-    'x-toolhead':    { cam: [45, -40, 30], at: [0, -12, 19], fit: true, hide: GROUPS_HIDDEN_OPEN, focus: MOVE.x, label: 'Toolhead, exploded (S15–S17)' },
+    'x-toolhead':    { cam: [60, -28, 24], at: [0, -12, 19], fit: true, hide: GROUPS_HIDDEN_OPEN, focus: MOVE.x, label: 'Toolhead, exploded (S15–S17)' },
     'x-idler':       { cam: [-2, -26, 60], at: [-16, -4, 50], fit: true, hide: GROUPS_HIDDEN_OPEN, focus: ['Upper Block - Left:1'], label: 'Upper idler stack, exploded (S12)' },
     'x-gantry':      { cam: [60, -125, 50], at: [0, -3, 26], fit: true, hide: GROUPS_HIDDEN_OPEN, focus: ['Gantry:1'], label: 'CoreXZ gantry, exploded (S3)' },
     'x-motor':       { cam: [-48, -48, 22], at: [-18, -6, 7], fit: true, hide: GROUPS_HIDDEN_OPEN, focus: ['X Motor:1'], label: 'Motor A and its mount, exploded (S11)' },
