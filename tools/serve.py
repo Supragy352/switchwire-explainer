@@ -2,7 +2,7 @@
 Artifact host adds at publish time (doctype, charset, viewport), so KaTeX and layout
 behave the same locally. Usage: python -I tools/serve.py [port]
 Static build (GitHub Pages): python -I tools/serve.py --build _site"""
-import http.server, os, shutil, sys
+import hashlib, http.server, os, shutil, sys
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 HEAD = (b'<!doctype html><html lang="en"><head><meta charset="utf-8">'
@@ -40,7 +40,14 @@ if sys.argv[1:2] == ['--build']:
     out = sys.argv[2]
     for d in ('js', 'models'):
         shutil.copytree(os.path.join(ROOT, d), os.path.join(out, d), dirs_exist_ok=True)
-    open(os.path.join(out, 'index.html'), 'wb').write(page())
+    html = page()
+    # Pages caches files for 10 min; version the scripts by content so new HTML never runs old JS
+    for f in sorted(os.listdir(os.path.join(ROOT, 'js'))):
+        tag = hashlib.sha1(open(os.path.join(ROOT, 'js', f), 'rb').read()).hexdigest()[:10]
+        ref = f'src="js/{f}"'.encode()
+        assert ref in html, ref
+        html = html.replace(ref, f'src="js/{f}?v={tag}"'.encode())
+    open(os.path.join(out, 'index.html'), 'wb').write(html)
     sys.exit()
 
 port = int(sys.argv[1]) if len(sys.argv) > 1 else 8765
