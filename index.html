@@ -1,0 +1,994 @@
+<title>Switchwire, Part by Part</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: long-read column on the left, the CAD model as a sticky "bench" on the right
+   (a sticky band on top at phone width). Widgets sit inline where the PDF had worked examples. */
+:root {
+  --bg: #e9ecef;          /* cool machine-shop grey paper */
+  --surface: #f6f7f8;
+  --ink: #15181c;
+  --muted: #59616b;
+  --line: #cfd4da;
+  --accent: #c41e2a;      /* Voron red */
+  --y-axis: #1f5fc4;      /* the heavy Y system, blue as in the PDF figures */
+  --motor-a: #c41e2a;
+  --motor-b: #0e8a86;
+  --bar: #b9bfc6;
+  --stage: #dde1e5;
+  --ghost: #9aa3ad;
+  --belt: #1b1d20;
+  --ok: #1d7a3c;
+  --bad: #b3261e;
+  --font-display: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --font-body: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --font-data: "JetBrains Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+  --step--1: 0.84rem;
+  --step-0: 1.06rem;
+  --step-1: 1.3rem;
+  --step-2: 1.75rem;
+  --step-3: 2.6rem;
+  --step-4: clamp(2.6rem, 6vw, 4.2rem);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111316; --surface: #191c20; --ink: #e6e8eb; --muted: #9ba3ad; --line: #2b3036;
+    --accent: #ef4b55; --y-axis: #6a9eff; --motor-a: #ef4b55; --motor-b: #34c3bd; --bar: #3d444c;
+    --stage: #0c0e10; --ghost: #59626c; --belt: #3a3e44; --ok: #57c27c; --bad: #ff7b72;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111316; --surface: #191c20; --ink: #e6e8eb; --muted: #9ba3ad; --line: #2b3036;
+  --accent: #ef4b55; --y-axis: #6a9eff; --motor-a: #ef4b55; --motor-b: #34c3bd; --bar: #3d444c;
+  --stage: #0c0e10; --ghost: #59626c; --belt: #3a3e44; --ok: #57c27c; --bad: #ff7b72;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink);
+  font: 400 var(--step-0)/1.62 var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-underline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.layout { display: grid; grid-template-columns: minmax(0, 1fr); }
+.doc {
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 6rem;
+  min-width: 0;
+}
+.doc > * { max-width: 42rem; margin-inline: auto; }
+
+/* ---------- stage (3D) ---------- */
+.stage-wrap {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+  height: 42svh; min-height: 260px;
+  background: var(--stage);
+  border-bottom: 1px solid var(--line);
+}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--stage); }
+.stage-wrap.is-collapsed { height: 3rem; min-height: 0; }
+.stage-wrap.is-collapsed canvas, .stage-wrap.is-collapsed .stage-hint, .stage-wrap.is-collapsed .stage-pick { visibility: hidden; }
+#stage { position: absolute; inset: 0; }
+#stage canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+#stage canvas:active { cursor: grabbing; }
+.stage-bar {
+  position: absolute; left: 0; right: 0; top: 0;
+  display: flex; gap: 0.75rem; align-items: center; justify-content: space-between;
+  padding: 0.6rem max(12px, env(safe-area-inset-right, 0px)) 0.6rem max(12px, env(safe-area-inset-left, 0px));
+  pointer-events: none;
+}
+.stage-label {
+  font: 600 0.95rem/1.2 var(--font-display); letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--ink); background: color-mix(in srgb, var(--stage) 80%, transparent);
+  padding: 0.25rem 0.5rem; border-left: 3px solid var(--accent); min-width: 0;
+}
+.stage-toggle { pointer-events: auto; }
+.stage-status, .stage-hint, .stage-pick {
+  position: absolute; left: max(12px, env(safe-area-inset-left, 0px));
+  font: 400 var(--step--1)/1.4 var(--font-data); color: var(--muted);
+}
+.stage-status { top: 50%; right: 12px; text-align: center; transform: translateY(-50%); }
+.stage-hint { bottom: 0.6rem; right: 12px; }
+@media (max-width: 700px) { .stage-hint { display: none; } }
+.stage-pick {
+  bottom: 2.4rem; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--line); padding: 0.3rem 0.55rem; max-width: calc(100% - 24px);
+}
+button, .btn {
+  font: 600 0.9rem/1 var(--font-display); letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--ink); background: var(--surface); border: 1px solid var(--line);
+  padding: 0.5rem 0.7rem; cursor: pointer; border-radius: 2px;
+}
+button:hover { border-color: var(--ink); }
+
+@media (min-width: 1100px) {
+  .layout { grid-template-columns: minmax(0, 46rem) minmax(0, 1fr); }
+  .stage-wrap { order: 2; height: 100vh; height: 100dvh; border-bottom: 0; border-left: 1px solid var(--line); }
+  .stage-toggle { display: none; }
+  .doc { padding-left: max(2.5rem, env(safe-area-inset-left, 0px)); padding-right: 2.5rem; }
+}
+
+/* ---------- type ---------- */
+header.masthead { padding-block: 3rem 1rem; }
+.eyebrow {
+  font: 600 0.95rem/1 var(--font-display); letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent);
+  margin: 0 0 0.8rem;
+}
+h1 {
+  font: 700 var(--step-4)/0.95 var(--font-display); letter-spacing: -0.01em; margin: 0 0 1rem;
+  text-wrap: balance; text-transform: uppercase;
+}
+.lede { font-size: var(--step-1); line-height: 1.5; margin: 0 0 1.25rem; }
+.meta { font: 400 var(--step--1)/1.5 var(--font-data); color: var(--muted); margin: 0; }
+section.chapter { padding-top: 3.5rem; }
+h2 {
+  font: 700 var(--step-3)/1 var(--font-display); text-transform: uppercase; letter-spacing: 0.005em;
+  margin: 0 0 1rem; text-wrap: balance; display: flex; gap: 0.6rem; align-items: baseline;
+  border-top: 2px solid var(--ink); padding-top: 0.7rem;
+}
+h2 .num { color: var(--accent); font-variant-numeric: tabular-nums; }
+h3 {
+  font: 600 var(--step-1)/1.2 var(--font-display); letter-spacing: 0.02em; text-transform: uppercase;
+  margin: 2.2rem 0 0.6rem; text-wrap: balance;
+}
+h3 .num { color: var(--muted); margin-right: 0.35rem; font-variant-numeric: tabular-nums; }
+p { margin: 0 0 1rem; }
+ul, ol { margin: 0 0 1rem; padding-left: 1.3rem; }
+li { margin-bottom: 0.4rem; }
+strong { font-weight: 600; }
+code, .mono { font-family: var(--font-data); font-size: 0.86em; }
+code { background: var(--surface); border: 1px solid var(--line); padding: 0.05em 0.3em; border-radius: 2px; }
+.note { font-size: var(--step--1); color: var(--muted); }
+.view-link {
+  font: 600 0.8rem/1 var(--font-display); letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--muted); background: none; border: 0; border-bottom: 1px dotted var(--muted); padding: 0; cursor: pointer;
+}
+.view-link:hover { color: var(--accent); border-color: var(--accent); }
+
+/* equations */
+.eq {
+  display: block; overflow-x: auto; margin: 0.4rem 0 1.1rem; padding: 0.7rem 0.9rem;
+  background: var(--surface); border-left: 3px solid var(--line); font-size: 1.08rem;
+}
+.eq math { display: block; }
+math { font-size: 1.04em; }
+.tex-src { font-family: var(--font-data); font-size: 0.85em; white-space: pre-wrap; }
+
+/* tables */
+.table-wrap { overflow-x: auto; margin: 0.5rem 0 1.4rem; }
+table { border-collapse: collapse; width: 100%; font-size: 0.95rem; line-height: 1.4; }
+th, td { text-align: left; vertical-align: top; padding: 0.5rem 0.6rem 0.5rem 0; border-bottom: 1px solid var(--line); }
+th { font: 600 0.82rem/1.2 var(--font-display); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+td.n, th.n { font-family: var(--font-data); font-size: 0.85rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
+td .show {
+  font: 600 0.75rem/1 var(--font-display); letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 0.3rem 0.45rem; white-space: nowrap;
+}
+
+/* subsystem map (section 1) */
+.subsystems { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 0.6rem; margin: 1rem 0 1.4rem; }
+.subsystems button {
+  text-align: left; text-transform: none; letter-spacing: 0; font: 400 0.92rem/1.4 var(--font-body);
+  padding: 0.75rem 0.85rem; display: grid; gap: 0.2rem; background: var(--surface);
+}
+.subsystems button b { font: 600 1.05rem/1.1 var(--font-display); letter-spacing: 0.04em; text-transform: uppercase; }
+.subsystems button.is-y { border-color: var(--y-axis); box-shadow: inset 3px 0 0 var(--y-axis); }
+.subsystems button span { color: var(--muted); }
+
+/* layered stacks (bed, hotend, power) */
+.stack { list-style: none; padding: 0; margin: 0.6rem 0 1.4rem; display: grid; gap: 3px; }
+.stack li {
+  margin: 0; display: grid; grid-template-columns: minmax(0, 12rem) minmax(0, 1fr); gap: 0.8rem;
+  padding: 0.45rem 0.7rem; background: var(--surface); font-size: 0.92rem; line-height: 1.35;
+}
+.stack li b { font: 600 0.95rem/1.3 var(--font-display); letter-spacing: 0.04em; text-transform: uppercase; }
+.stack li.hot { box-shadow: inset 3px 0 0 var(--accent); }
+.stack li.cold { box-shadow: inset 3px 0 0 var(--y-axis); }
+@media (max-width: 520px) { .stack li { grid-template-columns: 1fr; gap: 0.1rem; } }
+
+/* ---------- widgets ---------- */
+.widget {
+  margin: 1.4rem 0 1.8rem; padding: 1rem 1rem 1.1rem; background: var(--surface);
+  border: 1px solid var(--line); border-top: 3px solid var(--accent);
+}
+.widget-head { display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; align-items: baseline; justify-content: space-between; margin-bottom: 0.8rem; }
+.widget-head h4 { margin: 0; font: 700 1.15rem/1.1 var(--font-display); letter-spacing: 0.05em; text-transform: uppercase; }
+.widget-head .tag { font: 400 0.75rem/1 var(--font-data); color: var(--muted); }
+.controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 0.7rem 1.2rem; margin-bottom: 0.9rem; }
+.ctl { display: grid; gap: 0.25rem; min-width: 0; }
+.ctl label, .ctl .lbl { display: flex; justify-content: space-between; gap: 0.5rem; font: 600 0.82rem/1.2 var(--font-display); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.ctl output { font: 600 0.82rem/1.2 var(--font-data); letter-spacing: 0; text-transform: none; color: var(--ink); }
+input[type="range"] { width: 100%; accent-color: var(--accent); }
+select { font: 400 0.9rem var(--font-data); padding: 0.35rem; background: var(--bg); color: var(--ink); border: 1px solid var(--line); }
+.seg { display: flex; flex-wrap: wrap; gap: 0; border: 1px solid var(--line); width: fit-content; max-width: 100%; }
+.seg label { display: block; cursor: pointer; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg span { display: block; padding: 0.4rem 0.6rem; font: 600 0.82rem/1 var(--font-data); color: var(--muted); border-right: 1px solid var(--line); }
+.seg label:last-child span { border-right: 0; }
+.seg input:checked + span { background: var(--ink); color: var(--bg); }
+.seg input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: -2px; }
+.readouts { display: grid; grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr)); gap: 0.5rem 1rem; margin: 0 0 0.8rem; }
+.readouts div { display: grid; gap: 0.1rem; border-top: 1px solid var(--line); padding-top: 0.35rem; }
+.readouts dt { font: 600 0.75rem/1.2 var(--font-display); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.readouts dd { margin: 0; font: 600 1.15rem/1.2 var(--font-data); font-variant-numeric: tabular-nums; }
+.readouts .em dd { color: var(--accent); }
+.widget canvas { display: block; width: 100%; height: 220px; }
+.widget canvas.short { height: 150px; }
+.buttons { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.8rem; }
+.verdict { font: 600 0.9rem/1.3 var(--font-display); letter-spacing: 0.04em; text-transform: uppercase; }
+.verdict[data-state="ok"] { color: var(--ok); }
+.verdict[data-state="bad"] { color: var(--bad); }
+.legend { display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; font: 400 0.78rem/1.3 var(--font-data); color: var(--muted); margin-top: 0.4rem; }
+.legend i { display: inline-block; width: 1.4em; height: 3px; vertical-align: middle; margin-right: 0.35em; }
+
+.sources li { font-size: 0.95rem; }
+footer.colophon { font-size: var(--step--1); color: var(--muted); border-top: 1px solid var(--line); padding-top: 1rem; margin-top: 3rem; }
+
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+
+<div class="layout">
+  <aside class="stage-wrap" id="stage-wrap" aria-label="3D model of the Voron Switchwire">
+    <div id="stage">
+      <canvas aria-label="Interactive 3D model. Drag to orbit, scroll or pinch to zoom, click a part to name it."></canvas>
+      <div class="stage-bar">
+        <span class="stage-label">Whole machine, panels off (S1)</span>
+        <button class="stage-toggle" id="stage-toggle" aria-expanded="true" aria-controls="stage-wrap">Hide model</button>
+      </div>
+      <p class="stage-status">Loading the CAD model…</p>
+      <p class="stage-pick" hidden></p>
+      <p class="stage-hint">Drag to orbit · scroll to zoom · click a part to name it</p>
+    </div>
+  </aside>
+
+  <main class="doc">
+    <header class="masthead" data-view="overview">
+      <p class="eyebrow">Voron Switchwire · bed slinger mechanics</p>
+      <h1>Switchwire, part by part</h1>
+      <p class="lede">The print bed is the heaviest thing on this printer, and it is also the thing that has to accelerate hardest. Almost every design decision on the Switchwire follows from that.</p>
+      <p class="meta">Built from the Switchwire CAD assembly (Voron repository, January 2025). The model alongside is the real assembly, 781 parts. It follows the section you are reading. Numbers marked ≈ are order-of-magnitude estimates, not measurements of a particular machine.</p>
+    </header>
+
+    <!-- ===================== 1 ===================== -->
+    <section class="chapter" id="s1" data-view="overview">
+      <h2><span class="num">1</span> What a Switchwire is</h2>
+      <p>The Switchwire is a bed slinger: the print bed moves back and forth to make the Y axis, while the toolhead moves left–right (X) and up–down (Z) on a gantry driven by a CoreXZ belt system. Every part on its bill of materials does one of five jobs: hold geometry fixed (frame), constrain motion to one degree of freedom (rails), transmit force (belts, pulleys, motors), put heat in the right place and nowhere else (bed and hotend), or sense and decide (electronics and firmware).</p>
+      <p class="note">Each block below is clickable and highlights that subsystem in the model.</p>
+      <div class="subsystems">
+        <button data-show="Frame:1|Foot - TPU" data-label="Frame"><b>Frame</b><span>3060 / 3030 / 2020 aluminium extrusion, panels, TPU feet</span></button>
+        <button data-show="Gantry:1|Counterweight:1" data-label="CoreXZ gantry"><b>X and Z: CoreXZ gantry</b><span>Motors A + B fixed to the frame, two belts, two Z rails, 2020 X beam, Key-Bak counterweight</span></button>
+        <button class="is-y" data-show="Y Axis Assembly:1" data-label="Y axis"><b>Y: the bed slinger axis</b><span>One motor, one 6 mm GT2 belt loop, one MGN12H rail. Sets the speed limit.</span></button>
+        <button data-show="Stealthburner_Assembly:1|CW2_Assembly:1|SB TOOLHEAD-Revo Voron:1|X Carriage 2.4 v9:1" data-label="Toolhead"><b>Toolhead (X and Z)</b><span>StealthBurner, Clockwork 2, hotend, fans, inductive probe</span></button>
+        <button class="is-y" data-show="Bed Assembly:1" data-label="Bed"><b>Bed (Y)</b><span>MK52-style 24 V heated bed, magnets, spring-steel PEI sheet</span></button>
+        <button data-show="Electronics:1" data-label="Electronics"><b>Electronics and Klipper</b><span>24 V PSU, SKR Mini E3, Raspberry Pi: 4 motors, 2 heaters</span></button>
+      </div>
+
+      <h3>Why a bed slinger is worth studying</h3>
+      <p>Most hobby printers are either bed slingers (Prusa i3, Ender 3) or CoreXY machines (Voron 2.4, Trident, Bambu X1). The Switchwire sits between them. It keeps the bed slinger's simple open frame but borrows the CoreXY idea of two stationary motors working together through a crossed belt path, applied to X and Z instead of X and Y.</p>
+      <p>A heated aluminium bed with a steel sheet weighs on the order of a kilogram, several times a typical toolhead. Since <span class="tex">F = ma</span>, and the frame must react every newton the motor pushes into the bed, nearly every choice on the Y axis is about managing that inertia. Section 9 works it through.</p>
+
+      <h3>Coordinate conventions</h3>
+      <ul>
+        <li><strong>X</strong>: left–right, along the gantry.</li>
+        <li><strong>Y</strong>: front–back, the direction the bed travels. Moving the bed backward is the same as moving the nozzle forward relative to the part.</li>
+        <li><strong>Z</strong>: vertical. Z is a gantry axis, not a moving bed: the whole X gantry rises as the print grows.</li>
+        <li><strong>A and B</strong>: the two CoreXZ motors. In the CAD they are called "X motor" (A, left) and "Z motor" (B, right), but neither alone moves X or Z. Their sum and difference do.</li>
+      </ul>
+    </section>
+
+    <!-- ===================== 2 ===================== -->
+    <section class="chapter" id="s2" data-view="kinematics">
+      <h2><span class="num">2</span> Kinematics</h2>
+      <p>The Switchwire combines a plain Cartesian Y axis (one motor, one belt, the bed) with a CoreXZ system for X and Z (two motors, two belts, both coupled to the toolhead). Klipper calls the combination <code>corexz</code>.</p>
+
+      <h3 data-view="belts"><span class="num">2.1</span>A single belt axis</h3>
+      <p>A stepper turns a toothed pulley; the pulley pulls a toothed belt clamped to the moving object. With a pulley of <span class="tex">N</span> teeth and belt pitch <span class="tex">p</span>, one revolution moves the belt by</p>
+      <div class="eq">\Delta s_{\text{rev}} = N p</div>
+      <p>For the 20-tooth GT2 pulley (<span class="tex">p = 2</span> mm) that is 40 mm, Klipper's <code>rotation_distance</code>. A 1.8° stepper has 200 full steps per revolution; with <span class="tex">m</span> microsteps the commanded increment is</p>
+      <div class="eq">\delta s = \frac{N p}{200\, m} = \frac{40\ \text{mm}}{3200} = 12.5\ \mu\text{m} \quad (m = 16)</div>
+      <p>That is the resolution of commands, not of position: belt stretch, pulley eccentricity and microstep torque (Section 5) limit real accuracy. The official SKR configuration uses 32 microsteps, halving the increment to 6.25 µm. The Y axis is exactly this arrangement: motor at the rear, belt loop under the bed, idler at the front, belt ends clamped to the bed carriage.</p>
+
+      <h3 data-view="kinematics"><span class="num">2.2</span>The CoreXZ idea</h3>
+      <p>Both motors are fixed to the frame. Each belt climbs from its motor to a fixed idler at the top, crosses the machine, drops to an idler on the moving gantry and ends at the X carriage. It is CoreXY rotated 90° to stand vertically. With belt displacements <span class="tex">a</span> and <span class="tex">b</span> from motors A and B:</p>
+      <div class="eq">\Delta X = \tfrac{1}{2}(\Delta a + \Delta b), \qquad \Delta Z = \tfrac{1}{2}(\Delta a - \Delta b)</div>
+      <p>and the firmware inverts it:</p>
+      <div class="eq">\Delta a = \Delta X + \Delta Z, \qquad \Delta b = \Delta X - \Delta Z</div>
+
+      <div class="widget" id="w-corexz">
+        <div class="widget-head"><h4>Drive the gantry with motors A and B</h4><span class="tag">moves the model · Sec. 2.2</span></div>
+        <div class="buttons">
+          <button type="button" data-cx="100,100">Same way: pure X</button>
+          <button type="button" data-cx="120,-120">Opposite: pure Z</button>
+          <button type="button" data-cx="120,0">Motor A only</button>
+          <button type="button" data-cx="0,0">Home</button>
+        </div>
+        <div class="controls">
+          <div class="ctl"><label for="cx-a"><span>Motor A belt, Δa</span><output id="cx-a-out" for="cx-a">0 mm</output></label>
+            <input type="range" id="cx-a" min="-240" max="360" step="1" value="0"></div>
+          <div class="ctl"><label for="cx-b"><span>Motor B belt, Δb</span><output id="cx-b-out" for="cx-b">0 mm</output></label>
+            <input type="range" id="cx-b" min="-360" max="240" step="1" value="0"></div>
+        </div>
+        <dl class="readouts">
+          <div class="em"><dt>Nozzle ΔX</dt><dd id="cx-x">0 mm</dd></div>
+          <div class="em"><dt>Gantry ΔZ</dt><dd id="cx-z">0 mm</dd></div>
+        </dl>
+        <canvas aria-label="Nozzle position in the XZ plane, built from motor A's and motor B's contributions"></canvas>
+        <p class="legend"><span><i style="background:var(--motor-a)"></i>Motor A belt</span><span><i style="background:var(--motor-b)"></i>Motor B belt</span><span><i style="background:var(--ink)"></i>Net nozzle move</span></p>
+      </div>
+
+      <p>Signs depend on routing and motor direction; Klipper absorbs them in <code>dir_pin</code>. The consequences matter more:</p>
+      <ol>
+        <li><strong>A pure X move turns both motors the same way.</strong> Each needs roughly half the torque a single X motor would.</li>
+        <li><strong>A pure Z move turns them in opposite directions.</strong> One side's belt shortens and the other's lengthens, lifting the gantry.</li>
+        <li><strong>One motor alone moves the nozzle diagonally</strong>, 45° in the XZ plane, by half its belt travel in each axis. If one driver fails or skips, the nozzle drifts diagonally, a useful diagnostic.</li>
+        <li><strong>The work is shared.</strong> Every move can use the power of both motors, unlike a Cartesian machine where an X move uses only the X motor.</li>
+      </ol>
+
+      <h3 data-view="counterweight"><span class="num">2.3</span>Gravity in a belt-driven Z</h3>
+      <p>A leadscrew Z axis is self-locking; a belt-driven one is not. In CoreXZ the gantry weight <span class="tex">W</span> hangs on the belts, and each motor's pulley must resist</p>
+      <div class="eq">\tau_{\text{hold}} \approx \frac{W}{2} \cdot r_{\text{pulley}}</div>
+      <p>For ≈1 kg of gantry and toolhead on a 20T pulley (pitch radius ≈6.4 mm) that is ≈0.03 N·m per motor, a small fraction of a NEMA 17's holding torque. The motors hold easily while energised, but with drivers off the gantry slides down, and gravity biases every Z move. The Switchwire fixes this mechanically: a <strong>Key-Bak Super 48</strong> spring retractor, the kind used for keys on a belt, is tied to the gantry over an idler of two F695 bearings and pulls upward with a nearly constant force close to the gantry's weight. The net belt load is then small whether the motors are on or off. Klipper doesn't model the residual imbalance; the motors simply have margin. <button class="view-link" type="button" data-show="Counterweight:1" data-label="Key-Bak counterweight (S4)">Show the counterweight</button></p>
+
+      <h3 data-view="overview"><span class="num">2.4</span>Why not CoreXY, or a moving bed in Z?</h3>
+      <p>A CoreXY machine keeps the heavy bed out of the fast axes and moves it slowly in Z, but needs an enclosed cube frame and either a bed on leadscrews or a gantry on four Z motors. The Switchwire lets the bed move fast in Y and takes it out of Z: a simpler, open frame with three motion motors plus the extruder, at the cost of a heavy Y axis.</p>
+
+      <h3 data-view="yaxis"><span class="num">2.5</span>Equations of motion for one axis</h3>
+      <p>Model any axis as a mass driven through a belt of stiffness <span class="tex">k</span> by a motor whose rotor has inertia <span class="tex">J</span> on a pulley of radius <span class="tex">r</span>. The rotor adds an apparent linear mass <span class="tex">J/r^2</span>:</p>
+      <div class="eq">m_{\text{eff}} = m_{\text{load}} + \frac{J_{\text{rotor}}}{r^2}</div>
+      <p>A typical NEMA 17 rotor has <span class="tex">J \approx 5 \times 10^{-6}</span> kg·m², so with <span class="tex">r = 6.4</span> mm it adds ≈0.1 kg: small next to the bed, not small next to a light toolhead. The belt is a spring between pulley and load, so a step change in pulley position excites oscillation at</p>
+      <div class="eq">f_n = \frac{1}{2\pi}\sqrt{\frac{k}{m}}</div>
+      <p>That one equation explains ringing, why stiffer belts and lighter carriages help, and why input shaping works (Section 9).</p>
+    </section>
+
+    <!-- ===================== 3 ===================== -->
+    <section class="chapter" id="s3" data-view="frame">
+      <h2><span class="num">3</span> Frame, structure and linear motion</h2>
+      <p>The frame holds every rail, motor and idler in fixed relation while the motors push against it. Every compliance in the frame sits in series with the belts and lowers the machine's resonant frequency, so the frame is part of the motion system, not just a stand.</p>
+
+      <h3><span class="num">3.1</span>The extrusions</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th class="n">Qty</th><th>Profile</th><th class="n">Length</th><th>Role</th></tr></thead>
+        <tbody>
+          <tr><td class="n">2</td><td>3060, 6 mm slot</td><td class="n">520 mm</td><td>Base rails along Y; carry the Y rail and the whole machine</td></tr>
+          <tr><td class="n">2</td><td>3030, 6 mm slot</td><td class="n">400 mm</td><td>Uprights carrying the two Z rails</td></tr>
+          <tr><td class="n">2</td><td>3030</td><td class="n">300 mm</td><td>Cross members</td></tr>
+          <tr><td class="n">1</td><td>3030</td><td class="n">360 mm</td><td>Top cross member tying the uprights</td></tr>
+          <tr><td class="n">2</td><td>2020, 5-series</td><td class="n">340 mm</td><td>One frame member and the X-axis beam</td></tr>
+        </tbody>
+      </table></div>
+      <p class="note">Lengths from the official CAD; quantities match a third-party list. Check against the official BOM before ordering.</p>
+      <p>An extrusion is aluminium alloy (typically 6063-T5 or 6061) pushed through a die to a constant T-slotted cross-section. Its shape puts material far from the neutral axis, which is exactly what bending stiffness rewards.</p>
+
+      <h3><span class="num">3.2</span>Bending stiffness, and why the base is 3060</h3>
+      <p>Bending resistance is <span class="tex">EI</span>: Young's modulus times second moment of area. For a solid rectangle <span class="tex">I = bh^3/12</span>, so stiffness grows with the cube of depth; a 3060 on its 60 mm face is six to eight times stiffer vertically than a 3030. For a cantilever of length <span class="tex">L</span> with tip load <span class="tex">F</span>:</p>
+      <div class="eq">\delta = \frac{F L^3}{3 E I}</div>
+      <p>The <span class="tex">L^3</span> term is why the uprights are short, stout 3030 tied together at the top. A 400 mm free cantilever deflects almost three times as much as a 280 mm one; bracing the top makes it a beam fixed at both ends, up to sixteen times stiffer for a central load.</p>
+      <p>The X beam is a 2020 spanning ≈340 mm between the Z carriages. Simply supported with the toolhead at mid-span, <span class="tex">k = 48EI/L^3</span>; with <span class="tex">E \approx 69</span> GPa and <span class="tex">I \approx 7 \times 10^3</span> mm⁴, <span class="tex">k \approx 6 \times 10^5</span> N/m and a 0.5 kg toolhead resonates near 170 Hz, well above the Y axis. The weaker direction is torsion: the toolhead hangs in front of the beam, and a 2020's torsional stiffness is far below its bending stiffness.</p>
+
+      <h3><span class="num">3.3</span>Joints, fasteners and preload</h3>
+      <p>The frame uses blind joints: an M8×16 button-head screw passes through an access hole in one extrusion into the tapped end of the next, eight in total. The joint is clamped, not pinned; its stiffness is friction between faces under bolt tension:</p>
+      <div class="eq">T \approx K F d</div>
+      <p>With nut factor <span class="tex">K \approx 0.2</span>, an M8 at 10 N·m gives <span class="tex">F \approx 6</span> kN of clamp. While the faces never slip the joint is nearly rigid; once they slip, the frame can rack out of square. Elsewhere the BOM is dozens of M3 and M5 screws, T-nuts, and ≈70 brass heat-set inserts: threads cut straight into ABS strip and creep, while a knurled insert spreads the load and gives a durable metal thread.</p>
+
+      <h3 data-view="enclosed"><span class="num">3.4</span>Panels, feet and damping</h3>
+      <p>A rectangular frame resists bending well but resists shear (racking into a parallelogram) only through its joints. A panel fastened along its edges acts as a <strong>shear diaphragm</strong>, the same reason a box is stiffer than an open frame. The CAD panels are 3–4 mm; material is the builder's choice.</p>
+      <p>The four printed TPU feet decouple the printer from the table. TPU is a soft, lossy elastomer: it forms a low-frequency spring that lets the frame rock on fast Y moves (Section 9.7) but absorbs high-frequency motor noise. Builders trade the two by changing foot hardness or standing the printer on a heavy slab.</p>
+
+      <h3 data-view="rails"><span class="num">3.5</span>Linear guides: rails and carriages</h3>
+      <p>A linear guide removes five of a carriage's six degrees of freedom while letting the sixth move with almost no friction. The Switchwire uses miniature MGN profile rails rather than the V-slot wheels or smooth rods of budget bed slingers.</p>
+
+      <h3><span class="num">3.6</span>How a profile rail works</h3>
+      <p>The rail is hardened steel with precision-ground raceways. Inside the carriage, two rows of steel balls recirculate: they roll between carriage and rail in the loaded zone, then return through a channel in the body and plastic end caps. Rolling instead of sliding gives friction coefficients of 0.002–0.005, two orders of magnitude below a plain bushing.</p>
+      <p>The raceways meet each ball at an angle (a gothic-arch profile, typically 45°), so each row resists load in two directions; two rows resist vertical load, lateral load and moments about all three axes. That is why one carriage per rail is enough: four 300 mm MGN12H rails (two Z, one X, one Y), each with a single long H carriage. The bed rides on just one block.</p>
+
+      <h3><span class="num">3.7</span>Rail sizes</h3>
+      <p>MGN rails are named by width: MGN9 is 9 mm, MGN12 is 12 mm. Larger rails carry larger balls and much higher moment stiffness. The H suffix marks a long carriage. For a moment <span class="tex">M</span> resisted by two contact zones a distance <span class="tex">d</span> apart, each sees ≈<span class="tex">M/d</span>, so doubling <span class="tex">d</span> halves the load and the deflection.</p>
+
+      <h3><span class="num">3.8</span>Preload</h3>
+      <p>Preload is built-in interference between balls and raceways, from balls slightly larger than the gap. Hertzian contact is nonlinear, so stiffness rises with load:</p>
+      <div class="eq">\delta \propto F^{2/3}, \qquad k = \frac{dF}{d\delta} \propto F^{1/3}</div>
+      <p>A preloaded carriage starts partway up this curve: no play at zero load, higher stiffness for small loads, at the cost of friction and wear. Printer rails are usually Z0 or ZA (zero or light). Too much preload feels notchy and wastes torque; too little lets the carriage rock, which prints as layer-to-layer wobble.</p>
+
+      <h3 data-view="yaxis"><span class="num">3.9</span>Moment loads on a bed slinger</h3>
+      <p>The bed's centre of mass sits a height <span class="tex">h</span> above the rail, so accelerating it creates a pitching moment:</p>
+      <div class="eq">M_{\text{pitch}} = m_{\text{bed}}\, a\, h</div>
+      <p>With 1.4 kg, 5000 mm/s² and <span class="tex">h = 30</span> mm, <span class="tex">M \approx 0.21</span> N·m: small, but repeated millions of times. Any rocking in the carriage turns into vertical motion at the bed edges, which looks like Z wobble. One long H carriage keeps it small.</p>
+
+      <h3 data-view="rails"><span class="num">3.10</span>Mounting and alignment</h3>
+      <p>A rail is only as straight as what it is bolted to: extrusion is straight to roughly 0.1 mm per metre and the rail follows its bow. Parallel rails must be parallel within the carriage's tolerance or they fight each other. Builders align with a straightedge or printed guides and tighten from the centre out. Rails ship in preservative oil, not lubricant: clean them, then grease or oil them per the Voron docs. Dry balls wear the raceways gritty within a few hundred hours.</p>
+
+      <h3><span class="num">3.11</span>Rail failure modes</h3>
+      <ul>
+        <li><strong>Lost balls</strong>: pulling a carriage off without a retaining strip spills balls; it then binds or rattles.</li>
+        <li><strong>Brinelling</strong>: a sharp impact dents the raceway, leaving a permanent notch.</li>
+        <li><strong>Corrosion</strong>: rails are often carbon steel and rust if left dry in a humid room.</li>
+        <li><strong>Racking</strong>: misaligned parallel rails bind at one end of travel and run free at the other.</li>
+      </ul>
+    </section>
+
+    <!-- ===================== 4 ===================== -->
+    <section class="chapter" id="s4" data-view="belts">
+      <h2><span class="num">4</span> Belts, pulleys and idlers</h2>
+      <p>Belts are the springs of the motion system: they carry every newton from motor to load, and their stiffness and tooth engagement set both positional accuracy and resonant frequency. The Switchwire uses 6 mm GT2 belt (2 mm pitch) throughout. In the model the three belts are drawn from the real pulley positions, so they follow the axes when you move them.</p>
+
+      <h3><span class="num">4.1</span>Anatomy of a GT2 belt</h3>
+      <p>Three layers: a moulded elastomer body (neoprene or polyurethane) carrying the teeth, tensile cords (fibreglass in good belts, sometimes steel or aramid) along its length, and often a nylon facing on the teeth. The cords carry almost all the load and set the stiffness. GT2's rounded tooth enters and leaves the pulley with less sliding and backlash than trapezoidal MXL or T2.5, which matters at every direction reversal, every corner of a print.</p>
+
+      <h3><span class="num">4.2</span>Stiffness and stretch</h3>
+      <p>Under tension <span class="tex">T</span>, a span of length <span class="tex">L</span> stretches by</p>
+      <div class="eq">\Delta L = \frac{T L}{EA}</div>
+      <p>where <span class="tex">EA</span> is the belt's axial stiffness, dominated by the cords. A 9 mm belt is about 1.5× stiffer than a 6 mm one; fibreglass creeps little; steel cord is stiffer but fatigues on small pulleys; cheap polyester-cord belts stretch and creep over months. Dynamically the belt is the spring in <span class="tex">f_n</span>; statically, when the motor accelerates the load the belt first stretches by <span class="tex">F/k</span>, so the nozzle lags its commanded position by up to a few tens of microns.</p>
+
+      <h3><span class="num">4.3</span>Tension</h3>
+      <p>Pre-tension keeps the slack span from going slack during acceleration, so both spans act as springs in parallel, and slightly raises the effective stiffness. Too little allows tooth skipping and backlash; too much loads motor and idler bearings and speeds wear. The practical check is to pluck a span and measure its note, since a string of length <span class="tex">L</span>, tension <span class="tex">T</span> and linear density <span class="tex">\mu</span> vibrates at</p>
+      <div class="eq">f = \frac{1}{2L}\sqrt{\frac{T}{\mu}} \quad\Longrightarrow\quad T = \mu\,(2 L f)^2</div>
+
+      <div class="widget" id="w-pluck">
+        <div class="widget-head"><h4>Pluck a belt, get its tension</h4><span class="tag">Sec. 4.3, 4.5</span></div>
+        <div class="controls">
+          <div class="ctl"><label for="pk-f"><span>Measured note</span><output id="pk-f-out" for="pk-f">110 Hz</output></label>
+            <input type="range" id="pk-f" min="40" max="250" step="1" value="110"></div>
+          <div class="ctl"><label for="pk-L"><span>Free span length</span><output id="pk-L-out" for="pk-L">150 mm</output></label>
+            <input type="range" id="pk-L" min="50" max="400" step="5" value="150"></div>
+          <div class="ctl"><label for="pk-mu"><span>Belt mass per metre</span><output id="pk-mu-out" for="pk-mu">8.0 g/m</output></label>
+            <input type="range" id="pk-mu" min="4" max="14" step="0.2" value="8"></div>
+        </div>
+        <dl class="readouts">
+          <div class="em"><dt>Belt tension T</dt><dd id="pk-T">–</dd></div>
+          <div><dt>Idler load at 180° wrap</dt><dd id="pk-bear">–</dd></div>
+        </dl>
+        <p class="note">The mass per metre is an assumption for 6 mm glass-cord GT2; use your belt's datasheet value. On CoreXZ, match the two belts' notes: unequal tension makes the A and B paths unequally stiff, so the toolhead responds differently in +X and −X.</p>
+      </div>
+
+      <h3 data-view="motor"><span class="num">4.4</span>Drive pulleys</h3>
+      <p>The drive pulley is fixed to the motor shaft with grub screws against the shaft's flat. Its tooth count sets the gearing: fewer teeth give more force per unit torque (<span class="tex">F = \tau/r</span>) and finer resolution, but fewer teeth engaged and a tighter bend. With 20 teeth and ≈180° of wrap, about 10 teeth engage. Pulley eccentricity is a hidden error source: a bore off-centre by <span class="tex">e</span> makes the effective radius vary once per revolution, printing faint banding every 40 mm for a 20T pulley.</p>
+
+      <h3 data-view="kinematics"><span class="num">4.5</span>Idlers</h3>
+      <p>Idlers redirect the belt, either toothed (teeth facing the belt teeth) or smooth (running on the flat back). Most are flanged ball bearings, F695 and F623 being common, stacked or pressed into a toothed shell. The bearing carries twice the tension times the sine of half the wrap angle:</p>
+      <div class="eq">F_{\text{bearing}} = 2T\sin\!\left(\frac{\theta}{2}\right)</div>
+      <p>At 180° that is <span class="tex">2T</span>: 60–80 N at 30–40 N of tension, well within a small bearing's rating but enough to show as wear on a poor bearing or a flexing shaft. Flanges keep the belt from walking off; a belt that always rubs one flange points to a misaligned pulley or idler. <button class="view-link" type="button" data-show="Upper Block - Left:1|Upper Block - Right:1" data-label="Upper idlers: paired F695 (S12)">Show the upper idlers</button></p>
+
+      <h3 data-view="belts"><span class="num">4.6</span>Belt clamps</h3>
+      <p>Belt ends are clamped to the moving carriage by folding the belt over itself so the teeth interlock, then trapping it in a printed slot. The load passes in shear across many teeth instead of relying on friction. A loose clamp is a soft spring in series with the belt and lowers resonance far more than the belt itself. <button class="view-link" type="button" data-show="Y Belt Anchor:1" data-label="Y belt anchor, clamp and endstop (S13)">Show the Y belt clamp</button></p>
+    </section>
+
+    <!-- ===================== 5 ===================== -->
+    <section class="chapter" id="s5" data-view="motor">
+      <h2><span class="num">5</span> Motors: NEMA 17 steppers</h2>
+      <p>The three motion axes use 1.8° NEMA 17 hybrid steppers; the extruder uses a small round NEMA 14 pancake (the CAD models an LDO-36STH20). "NEMA 17" fixes only the faceplate, 1.7 in (≈42.3 mm) square with a standard bolt pattern. Torque, current, inductance and step angle vary by model, and they decide how fast the machine can move.</p>
+
+      <h3><span class="num">5.1</span>How a hybrid stepper works</h3>
+      <p>A permanent-magnet rotor sits between two toothed iron cups offset by half a tooth, so it presents alternating north and south teeth, typically 50. The stator has eight toothed poles carrying two phase windings, A and B. Energising a phase pulls the rotor to the position of least magnetic reluctance. With 50 teeth and a four-state sequence:</p>
+      <div class="eq">\theta_{\text{step}} = \frac{360^\circ}{4 \times 50} = 1.8^\circ</div>
+      <p>A 0.9° motor has 100 teeth and 400 steps per revolution: finer and often smoother, but it needs twice the step rate for the same shaft speed.</p>
+
+      <h3><span class="num">5.2</span>Torque versus angle, and microstepping</h3>
+      <p>With phase currents <span class="tex">I_A</span> and <span class="tex">I_B</span>, the torque at electrical angle <span class="tex">\theta_e</span> is approximately</p>
+      <div class="eq">\tau(\theta_e) \approx k_t \left( -I_A \sin\theta_e + I_B \cos\theta_e \right)</div>
+      <p>The rotor rests where torque is zero. Driving <span class="tex">I_A = I\cos\varphi</span>, <span class="tex">I_B = I\sin\varphi</span> moves that rest point smoothly to <span class="tex">\theta_e = \varphi</span>: microstepping. Two cautions follow. The restoring torque for a small error <span class="tex">\delta</span> is <span class="tex">k_t I \sin\delta</span>, so the torque that holds one microstep against a load shrinks with microstep size; microsteps buy smoothness, not precise positioning under load. And real motors deviate from sinusoidal torque, so microsteps are unequal, printing a fine periodic pattern called VFA (vertical fine artifacts).</p>
+
+      <div class="widget" id="w-micro">
+        <div class="widget-head"><h4>What a microstep buys, and costs</h4><span class="tag">Sec. 2.1, 5.2</span></div>
+        <div class="controls">
+          <div class="ctl"><span class="lbl">Microsteps per full step</span>
+            <div class="seg" role="radiogroup" aria-label="Microsteps per full step">
+              <label><input type="radio" name="ms" value="1" id="ms-1"><span>1</span></label>
+              <label><input type="radio" name="ms" value="2" id="ms-2"><span>2</span></label>
+              <label><input type="radio" name="ms" value="4" id="ms-4"><span>4</span></label>
+              <label><input type="radio" name="ms" value="8" id="ms-8"><span>8</span></label>
+              <label><input type="radio" name="ms" value="16" id="ms-16"><span>16</span></label>
+              <label><input type="radio" name="ms" value="32" id="ms-32" checked><span>32</span></label>
+              <label><input type="radio" name="ms" value="64" id="ms-64"><span>64</span></label>
+              <label><input type="radio" name="ms" value="128" id="ms-128"><span>128</span></label>
+            </div></div>
+          <div class="ctl"><label for="ms-motor"><span>Motor</span></label>
+            <select id="ms-motor"><option value="200" selected>1.8° (200 steps/rev)</option><option value="400">0.9° (400 steps/rev)</option></select></div>
+          <div class="ctl"><label for="ms-teeth"><span>Pulley</span></label>
+            <select id="ms-teeth"><option value="16">GT2 16 tooth</option><option value="20" selected>GT2 20 tooth</option></select></div>
+        </div>
+        <dl class="readouts">
+          <div><dt>Belt per revolution</dt><dd id="ms-rot">40 mm</dd></div>
+          <div class="em"><dt>Command increment</dt><dd id="ms-res">–</dd></div>
+          <div class="em"><dt>Torque per microstep</dt><dd id="ms-pct">–</dd></div>
+        </dl>
+        <canvas class="short" aria-label="Restoring torque for a one-microstep error, as a percentage of holding torque, by microstep setting"></canvas>
+        <p class="note">Restoring torque for a one-microstep error, <span class="tex">\sin(90^\circ/m)</span> of holding torque. The official SKR configuration runs 32.</p>
+      </div>
+
+      <h3><span class="num">5.3</span>The electrical side: inductance and back-EMF</h3>
+      <p>Each phase is an inductor <span class="tex">L</span> with resistance <span class="tex">R</span>, and the driver chops a supply voltage across it to regulate current:</p>
+      <div class="eq">V = I R + L \frac{dI}{dt} + k_e\,\omega</div>
+      <p>The last term is back-EMF, proportional to shaft speed. At high speed, back-EMF and the <span class="tex">L\,dI/dt</span> needed to reverse current every step consume the supply voltage, the current waveform collapses and torque falls: the torque–speed curve is flat at low speed and drops past a corner speed. Higher supply voltage and lower inductance move the corner up, which is why Vorons favour 24 V and some builders run motion drivers at 48 V.</p>
+
+      <h3><span class="num">5.4</span>Holding torque, current and heat</h3>
+      <p>A typical 1.8° NEMA 17 of 40–48 mm body length holds ≈0.4–0.55 N·m at 1.5–2 A. Klipper sets RMS current in software (<code>run_current</code>); running below rating cuts torque roughly in proportion and heat with the square (<span class="tex">P = I^2R</span> per phase). Motors run comfortably at 60–80 °C, but PLA mounts soften above ≈55 °C, one reason Voron parts are printed in ABS or ASA.</p>
+
+      <h3><span class="num">5.5</span>Mid-band resonance</h3>
+      <p>A stepper rotor is a mass on a magnetic spring; at some speeds the step frequency couples with its natural oscillation and the motor loses torque or stalls. TMC drivers damp this differently in StealthChop (voltage mode: quiet, but loses torque and can skip at speed) and SpreadCycle (current mode: louder, more robust). Many Voron configs use SpreadCycle on the motion axes.</p>
+
+      <h3><span class="num">5.6</span>The four motors on the Switchwire</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Motor</th><th>Drives</th><th>Why it matters</th><th></th></tr></thead>
+        <tbody>
+          <tr><td>A (CoreXZ)</td><td>One CoreXZ belt</td><td>Shares every X and Z move with B</td><td><button class="show" data-show="X Motor:1" data-label="Motor A (CAD: X Motor)">Show</button></td></tr>
+          <tr><td>B (CoreXZ)</td><td>The other CoreXZ belt</td><td>Shares every X and Z move with A</td><td><button class="show" data-show="Z Motor:1" data-label="Motor B (CAD: Z Motor)">Show</button></td></tr>
+          <tr><td>Y</td><td>Bed belt</td><td>Moves the heaviest mass; sets the speed ceiling</td><td><button class="show" data-show="Y Motor Mount:1" data-label="Y motor">Show</button></td></tr>
+          <tr><td>Extruder</td><td>Filament drive gears</td><td>Torque at low speed, compact and light</td><td><button class="show" data-show="LDO-36STH20" data-label="Extruder motor, NEMA 14 pancake">Show</button></td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <!-- ===================== 6 ===================== -->
+    <section class="chapter" id="s6" data-view="bed">
+      <h2><span class="num">6</span> The moving bed</h2>
+      <p>The bed is a Prusa MK52-style heated bed: a 24 V DC heater etched as a copper trace on an aluminium-core PCB, ≈250 × 210 mm, with embedded magnets that hold a removable spring-steel sheet. It is both a heater and the Y axis payload, so its design balances thermal performance against moving mass.</p>
+
+      <h3><span class="num">6.1</span>What is on the bed</h3>
+      <p>The print sits on six layers stacked on one rail block (top to bottom):</p>
+      <ol class="stack">
+        <li class="hot"><b>PEI coating</b><span>Grips hot plastic, releases it cold</span></li>
+        <li class="hot"><b>Spring-steel sheet</b><span>Magnetic; flexes to pop parts off</span></li>
+        <li class="hot"><b>MK52-style heated bed</b><span>24 V heater trace, magnets, NTC thermistor</span></li>
+        <li><b>Spacers, 6 × 6 × 3 mm</b><span>Fixed gap, M3 × 12 flat-head screws, nine of them</span></li>
+        <li><b>Y carriage</b><span>Prusa MK3-style plate</span></li>
+        <li class="cold"><b>MGN12H carriage block</b><span>The only support under the bed</span></li>
+        <li class="cold"><b>MGN12H rail, 300 mm</b><span>Bolted to the frame</span></li>
+      </ol>
+      <p>Unlike many bed slingers there is no separate machined plate and no levelling springs: the PCB is the plate, screwed down on rigid spacers. Levelling is done in software with the inductive probe and Klipper's bed mesh (Section 8). The bed wiring needs ≥1 mm² (AWG18) heater wire with ring terminals.</p>
+
+      <h3><span class="num">6.2</span>Joule heating</h3>
+      <div class="eq">P = \frac{V^2}{R}</div>
+      <p>The MK52 is commonly quoted near 220 W at 24 V (unverified for clones), implying <span class="tex">R \approx 2.6\ \Omega</span> and ≈9 A. That current is why the manual asks for at least 1 mm² wire to the bed and 2.5 mm² from the supply to the board: wire resistance turns current into heat, and a thin, flexing bed wire is a classic fire point. The board switches the heater with a MOSFET on its HB output, under Klipper's PID control.</p>
+
+      <h3><span class="num">6.3</span>Heat-up time and steady state</h3>
+      <p>The bed's heat capacity is roughly the sum of <span class="tex">mc</span> over its parts:</p>
+      <div class="eq">C \approx m_{\text{Al}} c_{\text{Al}} + m_{\text{steel}} c_{\text{steel}} \approx 0.55(900) + 0.25(470) \approx 610\ \text{J/K}</div>
+      <p>Heating 25 → 100 °C needs <span class="tex">Q = C\Delta T \approx 46</span> kJ, ≈3.5 minutes at 220 W with no losses. Losses stretch it, especially near the target: convection from both faces (≈0.105 m², <span class="tex">h \approx 10</span> W/m²K) is ≈80 W at 100 °C, and the PEI top radiates</p>
+      <div class="eq">P_{\text{rad}} = \varepsilon \sigma A (T^4 - T_0^4) \approx 0.9 \times 5.67\times10^{-8} \times 0.0525 \times (373^4 - 298^4) \approx 31\ \text{W}</div>
+      <p>So at 100 °C the bed needs ≈110 W just to stay hot, half its capacity. That is why ABS and ASA (bed at 100–110 °C) benefit from an enclosure: warm air cuts losses. The configuration caps the bed at 130 °C.</p>
+
+      <div class="widget" id="w-heat">
+        <div class="widget-head"><h4>Heat the bed</h4><span class="tag">lumped model · Sec. 6.3</span></div>
+        <div class="controls">
+          <div class="ctl"><label for="ht-P"><span>Heater power</span><output id="ht-P-out" for="ht-P">220 W</output></label>
+            <input type="range" id="ht-P" min="80" max="400" step="5" value="220"></div>
+          <div class="ctl"><label for="ht-T"><span>Target</span><output id="ht-T-out" for="ht-T">100 °C</output></label>
+            <input type="range" id="ht-T" min="40" max="130" step="5" value="100"></div>
+          <div class="ctl"><label for="ht-amb"><span>Air around the bed</span><output id="ht-amb-out" for="ht-amb">25 °C</output></label>
+            <input type="range" id="ht-amb" min="15" max="60" step="1" value="25"></div>
+          <div class="ctl"><label for="ht-h"><span>Convection h</span><output id="ht-h-out" for="ht-h">10 W/m²K</output></label>
+            <input type="range" id="ht-h" min="4" max="25" step="1" value="10"></div>
+        </div>
+        <dl class="readouts">
+          <div class="em"><dt>Time to target</dt><dd id="ht-time">–</dd></div>
+          <div><dt>Losses at target</dt><dd id="ht-loss">–</dd></div>
+          <div><dt>Hottest it can get</dt><dd id="ht-max">–</dd></div>
+        </dl>
+        <canvas aria-label="Bed temperature against time"></canvas>
+        <p class="note">Raise the air temperature to see what an enclosure does. The model uses C = 610 J/K, 0.105 m² of convecting area and ε = 0.9 on the 0.0525 m² top face, the figures from the text; it ignores the PID overshoot and the bed's own temperature gradient.</p>
+      </div>
+
+      <h3><span class="num">6.4</span>The thermistor and the control loop</h3>
+      <p>An NTC thermistor's resistance falls steeply with temperature. The simple beta model:</p>
+      <div class="eq">R(T) = R_0 \exp\!\left[\beta\left(\frac{1}{T} - \frac{1}{T_0}\right)\right]</div>
+      <p>with <span class="tex">R_0 = 100</span> kΩ at 25 °C and <span class="tex">\beta \approx 3950</span> K. The board reads it through a voltage divider; sensitivity is highest near room temperature and falls as it heats, which is why NTCs become inaccurate above ≈280–300 °C. Klipper runs PID (heater duty = <span class="tex">K_p e + K_i \int e\,dt + K_d\, de/dt</span>), and <code>PID_CALIBRATE</code> fits the gains to the bed's thermal lag. Thermal runaway protection shuts down if the temperature fails to rise or drifts from target, which only works if the thermistor stays bonded to the bed: one that falls off reads low and the controller drives the heater flat out. The manual lists no separate thermal fuse; many builders add one as a hardware backstop.</p>
+
+      <h3><span class="num">6.5</span>Magnets and the spring-steel sheet</h3>
+      <p>Neodymium magnets lose remanence at about 0.1% per kelvin, reversibly below their grade's maximum working temperature; beyond it the loss is permanent. Standard N grades are rated to ≈80 °C; H and SH grades tolerate more. A bed that sheds its sheet's grip after months of hot printing often has over-heated magnets. Spring steel is chosen because it is ferromagnetic and has a high yield strength, so it flexes to release parts and springs back flat. PEI, smooth or textured, bonds to hot PLA, PETG and ABS and releases as it cools.</p>
+
+      <h3><span class="num">6.6</span>Thermal expansion and bed flatness</h3>
+      <p>Aluminium expands at <span class="tex">\alpha \approx 23 \times 10^{-6}</span>/K. Over 250 mm and a 75 K rise:</p>
+      <div class="eq">\Delta L = \alpha L \Delta T = 23\times10^{-6} \times 250\ \text{mm} \times 75 \approx 0.43\ \text{mm}</div>
+      <p>The steel sheet grows about half as much. A bed hotter on one face bows like a bimetallic strip, doming by tens of microns, which matters under a 0.2 mm first layer. The remedy is procedural: heat-soak, then probe the mesh at printing temperature. Screws fixing the bed must let it expand; a bed clamped rigidly at four corners has nowhere to go and bows.</p>
+
+      <h3><span class="num">6.7</span>The bed as a moving mass</h3>
+      <p>Everything above rides on the Y carriage. Every extra gram of plate or magnet lowers the Y resonance and raises the force per unit acceleration (Section 9). The thin PCB bed is a deliberate choice for low mass at some cost in thermal uniformity compared with a thick cast plate.</p>
+    </section>
+
+    <!-- ===================== 7 ===================== -->
+    <section class="chapter" id="s7" data-view="toolhead">
+      <h2><span class="num">7</span> Toolhead and extruder</h2>
+      <p>The current release uses the Voron StealthBurner toolhead with a Clockwork 2 extruder (older revisions used the Afterburner). Its job is to push filament at a controlled rate, melt it in a small, well-defined zone and freeze it again the instant it leaves the nozzle, while staying as light as possible because it rides the CoreXZ gantry.</p>
+
+      <h3><span class="num">7.1</span>What is on the toolhead</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Part</th><th>Role</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>StealthBurner printed housing</td><td>Holds everything; ducts cooling air</td><td>ABS/ASA</td></tr>
+          <tr><td>Clockwork 2 extruder, 50:10 gears</td><td>Pushes filament</td><td>Bondtech-style 5 mm dual drive gears</td></tr>
+          <tr><td>Extruder stepper</td><td>Turns the gears</td><td>Short-body; per the StealthBurner BOM</td></tr>
+          <tr><td>Hotend (V6, Dragon, Rapido, Revo…)</td><td>Melts filament</td><td>The CAD models a Revo Voron</td></tr>
+          <tr><td>Heater cartridge, 24 V</td><td>Heats the melt zone</td><td>Wattage per hotend</td></tr>
+          <tr><td>Hotend thermistor</td><td>Measures melt-zone temperature</td><td>Generic 3950 NTC, 270 °C cap</td></tr>
+          <tr><td>Hotend fan</td><td>Cools heat sink and heat break</td><td>Runs whenever the hotend exceeds 50 °C</td></tr>
+          <tr><td>Part-cooling fan</td><td>Freezes the extruded plastic</td><td>Under G-code control</td></tr>
+          <tr><td>Inductive probe</td><td>Senses bed height for Z homing and mesh</td><td>Section 8.6</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3 data-view="extruder"><span class="num">7.2</span>The extruder: gears and grip</h3>
+      <p>The Clockwork 2 squeezes filament between two hobbed gears. The motor's 10-tooth pinion drives a 50-tooth gear (5:1); that gear turns one drive gear, which meshes with the second. Gripping from both sides balances the lateral force and doubles the teeth biting in. The filament force available is</p>
+      <div class="eq">F_{\text{fil}} = \frac{\tau_{\text{motor}} \times 5}{r_{\text{drive}}}</div>
+      <p>Klipper's <code>rotation_distance</code> = 22.68 mm with that ratio gives an effective drive diameter of 22.68/π ≈ 7.2 mm, so <span class="tex">r \approx 3.6</span> mm. A modest 0.1 N·m at the motor puts ≈140 N on the filament, far more than the 10–40 N typical extrusion needs. The real limit is grip: past what the teeth can hold, they chew a groove and extrusion stops. The idler's spring and thumbscrew set the normal force: too little and the gears slip, too much and they crush soft filament.</p>
+
+      <h3 data-view="toolhead"><span class="num">7.3</span>The hotend: a heat engine in reverse</h3>
+      <p>Four thermal zones, and the design problem is making the cold-to-hot transition as short as possible. Filament that softens above the heat break swells and jams: heat creep.</p>
+      <ol class="stack">
+        <li class="cold"><b>Drive gears</b><span>Cold, solid filament; 5:1 reduction</span></li>
+        <li class="cold"><b>Heat sink + hotend fan</b><span>Removes heat that leaks up; filament stays solid</span></li>
+        <li><b>Heat break</b><span>Thin wall, low conductivity: R = L / kA is large</span></li>
+        <li class="hot"><b>Heater block (melt zone)</b><span>Heater cartridge and thermistor; filament melts here</span></li>
+        <li class="hot"><b>Nozzle</b><span>Orifice sets line width; plastic leaves molten</span></li>
+      </ol>
+      <div class="eq">R_{\text{th}} = \frac{L}{k A}</div>
+      <p>A thin, low-<span class="tex">k</span> wall (stainless or titanium, sometimes copper-bimetal) makes <span class="tex">R</span> large so little heat leaks upward, and the finned sink and fan remove what does. That is why Klipper configures the hotend fan as a <code>heater_fan</code> that switches on above 50 °C.</p>
+
+      <h3><span class="num">7.4</span>Melting rate and the flow limit</h3>
+      <p>Volumetric flow is speed × line width × layer height: 0.45 × 0.2 mm lines at 150 mm/s are 13.5 mm³/s. Heating that PLA takes little power:</p>
+      <div class="eq">P_{\text{melt}} = Q \rho c \Delta T \approx 13.5\times10^{-9} \times 1240 \times 1800 \times 190 \approx 5.7\ \text{W}</div>
+      <p>A 40–60 W heater supplies that easily. The real limit is conduction time: heat diffuses into 1.75 mm filament on a timescale <span class="tex">t \sim r^2/\alpha</span>, several seconds for the core with <span class="tex">\alpha \approx 10^{-7}</span> m²/s, while filament crosses the melt zone in under a second at high flow. Longer melt zones (Volcano, Rapido UHF) and designs that split the stream (core-heating Revo variants, CHT nozzles) attack that diffusion time, not heater power.</p>
+
+      <h3><span class="num">7.5</span>Pressure advance</h3>
+      <p>Molten plastic is viscous and the filament path acts like a spring: pressure must build before flow starts, and residual pressure keeps oozing after the extruder stops, giving thin starts and blobby ends. Klipper's pressure advance drives the extruder ahead of the commanded flow:</p>
+      <div class="eq">v_{\text{ext,adj}} = v_{\text{ext}} + K_{\text{PA}} \frac{dv_{\text{ext}}}{dt}</div>
+      <p><span class="tex">K_{\text{PA}}</span> is tuned per filament and hotend; a short direct-drive path keeps it small.</p>
+
+      <h3><span class="num">7.6</span>Part cooling</h3>
+      <p>A thin line loses heat at <span class="tex">hA(T - T_{\text{air}})</span>, and forced convection raises <span class="tex">h</span> several-fold. Ducting matters as much as fan size: a jet aimed just below the nozzle cools the line without chilling the tip. PLA wants strong cooling; ABS and ASA want little, because rapid cooling raises shrinkage stress and layer separation.</p>
+
+      <h3><span class="num">7.7</span>Mass budget</h3>
+      <p>The toolhead's mass sets X acceleration through the CoreXZ belts and adds to the gantry weight the motors hold against gravity, hence short-body motors, compact hotends and thin-walled printed parts. But on the Switchwire, unlike a CoreXY, the toolhead is not the speed limit; the bed is. That leaves room for a heavier, higher-flow hotend without slowing the machine.</p>
+    </section>
+
+    <!-- ===================== 8 ===================== -->
+    <section class="chapter" id="s8" data-view="electronics">
+      <h2><span class="num">8</span> Electronics, sensing and firmware</h2>
+      <p>The electronics turn mains into regulated 24 V and 5 V, drive four steppers and two heaters, read thermistors and switches, and run Klipper split between a Raspberry Pi (the planner) and a microcontroller board (the real-time executor). The official design targets a BTT SKR Mini E3 (V2 or V3) or, for builders reusing Prusa parts, an Einsy Rambo.</p>
+
+      <h3><span class="num">8.1</span>Power path</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Part</th><th>Spec</th><th>Role</th><th></th></tr></thead>
+        <tbody>
+          <tr><td>Mains inlet module</td><td>IEC, wired to code</td><td>Brings mains in; earth goes to frame and PSUs</td><td><button class="show" data-show="JR Mains Inlet" data-label="Mains inlet">Show</button></td></tr>
+          <tr><td>Mean Well LRS-350-24</td><td class="n">24 V, 350 W (≈14.6 A)</td><td>Board, motors, bed, hotend, fans</td><td><button class="show" data-show="meanwell" data-label="Mean Well LRS-350-24">Show</button></td></tr>
+          <tr><td>Mean Well RS-25-5</td><td class="n">5 V, 25 W</td><td>Powers the Raspberry Pi independently</td><td><button class="show" data-show="MW RS-25" data-label="Mean Well RS-25-5">Show</button></td></tr>
+          <tr><td>Mains wire</td><td class="n">≥ 0.75 mm²</td><td>Inlet to PSUs</td><td></td></tr>
+          <tr><td>24 V DC wire, PSU to board</td><td class="n">≥ 2.5 mm²</td><td>Carries the whole machine's current</td><td></td></tr>
+        </tbody>
+      </table></div>
+      <p>Both supplies are switch-mode: they rectify mains, chop it at tens of kilohertz through a small transformer, then rectify and regulate. High frequency is what makes 350 W fit in a small box, since core size scales inversely with frequency. The budget is dominated by heaters: bed ≈220 W plus hotend ≈40–60 W plus motors and fans sits near the 350 W rating at peak, though heaters spend most of their time at partial duty. The separate 5 V supply keeps the Pi stable while the bed MOSFET switches nine amps.</p>
+
+      <h3><span class="num">8.2</span>Wire gauge, voltage drop and heat</h3>
+      <p>Copper of length <span class="tex">\ell</span> and cross-section <span class="tex">A</span> has <span class="tex">R = \rho\ell/A</span>, with <span class="tex">\rho \approx 1.7 \times 10^{-8}</span> Ω·m. For 0.5 m of 2.5 mm² wire (1 m round trip) at 14 A:</p>
+      <div class="eq">R = \frac{1.7\times10^{-8} \times 1}{2.5\times10^{-6}} \approx 6.8\ \text{m}\Omega, \quad V_{\text{drop}} \approx 0.1\ \text{V}, \quad P \approx 1.3\ \text{W}</div>
+
+      <div class="widget" id="w-wire">
+        <div class="widget-head"><h4>Size a wire</h4><span class="tag">Sec. 8.2</span></div>
+        <div class="controls">
+          <div class="ctl"><label for="wr-len"><span>Run length, one way</span><output id="wr-len-out" for="wr-len">0.50 m</output></label>
+            <input type="range" id="wr-len" min="0.1" max="2" step="0.05" value="0.5"></div>
+          <div class="ctl"><label for="wr-I"><span>Current</span><output id="wr-I-out" for="wr-I">14.0 A</output></label>
+            <input type="range" id="wr-I" min="0.5" max="16" step="0.5" value="14"></div>
+          <div class="ctl"><label for="wr-area"><span>Cross-section</span></label>
+            <select id="wr-area">
+              <option value="0.25">0.25 mm² (signals, motors, fans)</option>
+              <option value="0.5">0.5 mm² (hotend heater)</option>
+              <option value="0.75">0.75 mm² (mains)</option>
+              <option value="1">1 mm² (bed)</option>
+              <option value="1.5">1.5 mm²</option>
+              <option value="2.5" selected>2.5 mm² (PSU to board)</option>
+            </select></div>
+        </div>
+        <dl class="readouts">
+          <div><dt>Round-trip resistance</dt><dd id="wr-R">–</dd></div>
+          <div class="em"><dt>Voltage drop</dt><dd id="wr-V">–</dd></div>
+          <div class="em"><dt>Heat in the wire</dt><dd id="wr-P">–</dd></div>
+        </dl>
+        <p class="verdict" id="wr-verdict" data-state="ok" aria-live="polite"></p>
+        <p class="note">Try 0.25 mm² at 14 A: about a volt lost and over 10 W heating the insulation. The verdict flags more than 0.5 V or 5 W, a rule of thumb for this explainer, not a wiring standard.</p>
+      </div>
+      <p>Hence the manual's gauges: heavy wire wherever bed current flows, 0.5 mm² for the hotend heater, 0.25 mm² for signals, motors and fans.</p>
+
+      <h3><span class="num">8.3</span>The controller board and stepper drivers</h3>
+      <p>The SKR Mini E3 carries a 32-bit ARM microcontroller and four TMC2209 drivers configured over UART (the Einsy uses TMC2130 over SPI). Each driver is an H-bridge per phase with current sensing, chopping 24 V to hold each phase at its target. The official configs run 0.5 A for X, Y and Z and 0.7 A for the extruder, with 32 microsteps on the SKR (16 on the Einsy): conservative values that keep board and motors cool at the cost of torque, which is why the board has its own 6020 fan. The heater outputs are MOSFETs: at 9 A and 10 mΩ <span class="tex">R_{DS(on)}</span>, under 1 W, but a worn connector adds contact resistance in series and can overheat at the same current. <button class="view-link" type="button" data-show="SKR Mini E3 1.2" data-label="SKR Mini E3 controller (S19)">Show the board</button></p>
+
+      <h3><span class="num">8.4</span>Klipper's split architecture</h3>
+      <p>Klipper runs its motion planner, <code>corexz</code> kinematics, input shaper and pressure advance on the Raspberry Pi in Python, compiles a precise step schedule and sends it to the microcontroller, which only emits steps at the right times and reports sensors. The heavy maths runs on a fast general-purpose processor; the MCU's timing stays deterministic.</p>
+      <ol class="stack">
+        <li><b>Mains inlet, earthed</b><span>Feeds both supplies</span></li>
+        <li class="hot"><b>LRS-350-24 → SKR Mini E3</b><span>All motor and heater power: 4 steppers, bed and hotend heat, fans, sensors and probe</span></li>
+        <li class="cold"><b>RS-25-5 → Raspberry Pi</b><span>Klipper host and web interface, on its own 5 V</span></li>
+        <li><b>Pi ⇄ SKR over USB</b><span>Only the step schedule and sensor data cross this link</span></li>
+      </ol>
+
+      <h3><span class="num">8.5</span>Endstops: microswitches wired normally closed</h3>
+      <p>X and Y home against microswitches wired through the common and normally-closed contacts: the circuit is closed in normal operation and opens when pressed. A broken wire also opens it, so the firmware sees "triggered" and stops instead of driving the axis into the frame. Repeatability, often a few microns, comes from the snap-action spring blade flipping over centre at a fixed force. Y can instead home sensorlessly using the TMC2209's StallGuard; the config includes it as a commented option.</p>
+
+      <h3><span class="num">8.6</span>The inductive probe and Z</h3>
+      <p>Z has no endstop switch. It homes, and the bed is meshed, with an inductive probe on the toolhead (the manual pictures a PL-08N and recommends an Omron TL-Q5MC). The probe drives an LC oscillator; near a conductor its field induces eddy currents that dissipate energy and damp the oscillation, and past a threshold the output switches. The physics explains its quirks:</p>
+      <ul>
+        <li><strong>Material dependence.</strong> Trigger distance depends on the target's conductivity and permeability; steel triggers farther than aluminium, so changing sheets can change the Z offset.</li>
+        <li><strong>Temperature drift.</strong> Coil resistance and oscillator parameters drift as toolhead and bed warm. Probe at operating temperature.</li>
+        <li><strong>Supply voltage.</strong> Designed for 6–36 V; power from 24 V, not 5 V, or switching turns erratic.</li>
+      </ul>
+      <p>The probe output can swing to 24 V but the MCU input tolerates 3.3 V. The BOM's BAT85 Schottky diode sits in the signal line: the board's pull-up holds the input high; when the probe's NPN output pulls low, the diode conducts and drags the input low too; when the output goes high, the diode blocks 24 V from the pin. Klipper uses the probe as a virtual Z endstop (<code>probe:z_virtual_endstop</code>) and for <code>BED_MESH_CALIBRATE</code>, then adjusts Z continuously to follow the measured bed.</p>
+
+      <h3 data-view="chains"><span class="num">8.7</span>Cable chains and moving wires</h3>
+      <p>Three 10 × 11 mm cable chains carry wires to X, Y and Z. Copper fails by fatigue under repeated bending: each bend cycles the strands' strain and cracks grow until they break, and fatigue life falls steeply with strain amplitude, which the bend radius sets. Chains enforce a minimum radius and keep flexing in one plane. The manual warns that ordinary component leads are not chain-rated and recommends crimping onto high-flex wire with many fine strands. <span class="note">In the model the chains stay at their CAD pose when you move the axes.</span></p>
+
+      <h3 data-view="electronics"><span class="num">8.8</span>Earthing and safety</h3>
+      <p>Protective earth bonds the PSU cases and the aluminium frame. If a live conductor chafes against the frame, fault current flows to earth and trips the breaker or RCD instead of energising the machine. One solid bond per extrusion assembly, through anodising-piercing hardware or a star washer, is enough. Skipping earthing on a metal-framed printer is relying on luck.</p>
+    </section>
+
+    <!-- ===================== 9 ===================== -->
+    <section class="chapter" id="s9" data-view="yaxis">
+      <h2><span class="num">9</span> Bed-slinger physics</h2>
+      <p>A bed slinger's speed limit is set by the Y axis: a heavy, compliantly driven mass whose resonance sits low enough to print visible ringing unless the motion is shaped. This section builds that claim from first principles; order-of-magnitude numbers are labelled as estimates.</p>
+
+      <h3><span class="num">9.1</span>How heavy is the Y axis?</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Component</th><th class="n">Estimate</th><th>Basis</th></tr></thead>
+        <tbody>
+          <tr><td>MK52-style heated bed with magnets</td><td class="n">≈ 0.5–0.6 kg</td><td>250 × 210 × 3 mm aluminium at 2700 kg/m³, plus magnets</td></tr>
+          <tr><td>Spring-steel sheet with PEI</td><td class="n">≈ 0.2–0.3 kg</td><td>≈0.5 mm steel at 7850 kg/m³</td></tr>
+          <tr><td>Y carriage, rail block, spacers, clamps, moving wiring</td><td class="n">≈ 0.2–0.4 kg</td><td>Printed ABS/ASA parts and hardware</td></tr>
+          <tr><td><strong>Total Y moving mass</strong></td><td class="n"><strong>≈ 0.9–1.3 kg</strong></td><td>Plus the part being printed</td></tr>
+        </tbody>
+      </table></div>
+      <p>A StealthBurner-class toolhead with Clockwork extruder is ≈0.4–0.6 kg, so the bed is two to three times heavier. Below, <span class="tex">m_{\text{eff}} \approx 1.4</span> kg (an upper-end bed plus the Y rotor's apparent mass) is used as a conservative figure. With the same motors everywhere, for equal force the bed accelerates at a third to half the toolhead's rate.</p>
+
+      <h3><span class="num">9.2</span>Force, torque and the acceleration ceiling</h3>
+      <p>Suppose at printing speed a NEMA 17 delivers <span class="tex">\tau \approx 0.2</span> N·m (an estimate; it depends on motor, current and voltage). Through a 20T GT2 pulley:</p>
+      <div class="eq">F = \frac{\tau}{r} = \frac{0.2\ \text{N·m}}{6.37\times10^{-3}\ \text{m}} \approx 31\ \text{N}</div>
+      <p>With 1.4 kg that allows <span class="tex">a \approx 22</span> m/s², about 22 000 mm/s². Real bed slingers print at a few thousand. The limit is not torque. It is vibration, and the part on the bed.</p>
+
+      <h3><span class="num">9.3</span>The belt as a spring, and why stiffness depends on bed position</h3>
+      <p>A belt span of length <span class="tex">L</span> has stiffness <span class="tex">EA/L</span> (for reinforced GT2, <span class="tex">EA</span> is of order 10⁵ N). The carriage is pulled by two spans in parallel, pulley-to-carriage <span class="tex">L_1</span> and carriage-around-the-idler-and-back <span class="tex">L_2</span>:</p>
+      <div class="eq">k_Y = EA\left(\frac{1}{L_1} + \frac{1}{L_2}\right), \qquad L_1 + L_2 = L_{\text{loop}}</div>
+      <p>This is smallest with the bed mid-travel (<span class="tex">L_1 = L_2</span>) and rises sharply near either end. For <span class="tex">EA = 10^5</span> N and a 0.6 m loop, <span class="tex">k_Y \approx 6.7 \times 10^5</span> N/m at the centre, and with 1.4 kg:</p>
+      <div class="eq">f_n = \frac{1}{2\pi}\sqrt{\frac{6.7\times10^{5}}{1.4}} \approx 110\ \text{Hz}</div>
+
+      <div class="widget" id="w-yres">
+        <div class="widget-head"><h4>Move the bed, watch the resonance</h4><span class="tag">moves the model · Sec. 9.3–9.4</span></div>
+        <div class="controls">
+          <div class="ctl"><label for="yr-L1"><span>Bed position, span L₁</span><output id="yr-L1-out" for="yr-L1">300 mm</output></label>
+            <input type="range" id="yr-L1" min="60" max="540" step="5" value="300"></div>
+          <div class="ctl"><label for="yr-m"><span>Moving mass</span><output id="yr-m-out" for="yr-m">1.40 kg</output></label>
+            <input type="range" id="yr-m" min="0.6" max="2.5" step="0.05" value="1.4"></div>
+          <div class="ctl"><label for="yr-EA"><span>Belt EA</span><output id="yr-EA-out" for="yr-EA">1.0 × 10⁵ N</output></label>
+            <input type="range" id="yr-EA" min="0.3" max="2" step="0.1" value="1"></div>
+          <div class="ctl"><label for="yr-z"><span>Damping ratio ζ</span><output id="yr-z-out" for="yr-z">0.08</output></label>
+            <input type="range" id="yr-z" min="0.02" max="0.2" step="0.01" value="0.08"></div>
+          <div class="ctl"><label for="yr-v"><span>Print speed</span><output id="yr-v-out" for="yr-v">100 mm/s</output></label>
+            <input type="range" id="yr-v" min="30" max="300" step="5" value="100"></div>
+        </div>
+        <dl class="readouts">
+          <div><dt>Belt stiffness k_Y</dt><dd id="yr-k">–</dd></div>
+          <div class="em"><dt>Natural frequency</dt><dd id="yr-fn">–</dd></div>
+          <div class="em"><dt>Ripple spacing v / f_d</dt><dd id="yr-gap">–</dd></div>
+        </dl>
+        <canvas id="yr-curve" aria-label="Y natural frequency against bed position"></canvas>
+        <canvas id="yr-wall" class="short" aria-label="Ringing printed into the wall after a corner"></canvas>
+        <p class="note">Belt-only model with a 600 mm loop. Real Y resonances measure 30–60 Hz because the belt is not the only spring: the motor mount flexes, the frame twists and the printer rocks on its feet. Drop EA and raise the mass to see that range.</p>
+      </div>
+      <p>Measured bed-slinger Y resonances are usually lower, often 30–60 Hz, because the lowest-frequency mode in series wins, which is why Section 3 cares so much about frame stiffness. The model still predicts something real: resonance shifts as the bed moves, so a single input-shaper frequency is a compromise.</p>
+
+      <h3><span class="num">9.4</span>Ringing</h3>
+      <p>When the commanded velocity changes abruptly at a corner, the belt–mass system rings at <span class="tex">f_n</span>, decaying with damping ratio <span class="tex">\zeta</span> (typically 0.05–0.15 for printer axes):</p>
+      <div class="eq">x(t) = A\, e^{-\zeta\omega_n t}\sin(\omega_d t), \qquad \omega_d = \omega_n\sqrt{1-\zeta^2}</div>
+      <p>The nozzle keeps laying plastic, so the oscillation is printed into the wall as ripples spaced <span class="tex">v/f_d</span> apart. At 100 mm/s and 40 Hz they sit 2.5 mm apart, exactly the ghosting on test prints. Measuring that spacing with calipers is a cheap way to estimate <span class="tex">f_d</span>.</p>
+
+      <h3><span class="num">9.5</span>Input shaping</h3>
+      <p>Input shaping cancels the oscillation by design rather than by stiffness. Replace each acceleration step with two smaller steps half a damped period apart; the second step's oscillation is in antiphase with the first and they cancel. The zero-vibration (ZV) shaper's two impulses are</p>
+      <div class="eq">A_1 = \frac{1}{1+K}, \quad A_2 = \frac{K}{1+K}, \quad K = \exp\!\left(\frac{-\zeta\pi}{\sqrt{1-\zeta^2}}\right), \quad \Delta t = \frac{\pi}{\omega_d}</div>
+
+      <div class="widget" id="w-shaper">
+        <div class="widget-head"><h4>Cancel the ringing</h4><span class="tag">damped-oscillator model · Sec. 9.5</span></div>
+        <div class="controls">
+          <div class="ctl"><span class="lbl">Shaper</span>
+            <div class="seg" role="radiogroup" aria-label="Shaper type">
+              <label><input type="radio" name="sh-type" value="none" id="sh-none"><span>None</span></label>
+              <label><input type="radio" name="sh-type" value="zv" id="sh-zv" checked><span>ZV</span></label>
+              <label><input type="radio" name="sh-type" value="zvd" id="sh-zvd"><span>ZVD</span></label>
+            </div></div>
+          <div class="ctl"><label for="sh-fn"><span>Machine's real f_n</span><output id="sh-fn-out" for="sh-fn">40 Hz</output></label>
+            <input type="range" id="sh-fn" min="20" max="120" step="1" value="40"></div>
+          <div class="ctl"><label for="sh-fs"><span>Shaper tuned to</span><output id="sh-fs-out" for="sh-fs">40 Hz</output></label>
+            <input type="range" id="sh-fs" min="20" max="120" step="1" value="40"></div>
+          <div class="ctl"><label for="sh-z"><span>Damping ratio ζ</span><output id="sh-z-out" for="sh-z">0.10</output></label>
+            <input type="range" id="sh-z" min="0.02" max="0.25" step="0.01" value="0.1"></div>
+        </div>
+        <dl class="readouts">
+          <div class="em"><dt>Vibration left</dt><dd id="sh-resid">–</dd></div>
+          <div><dt>Corner smeared over</dt><dd id="sh-dt">–</dd></div>
+        </dl>
+        <canvas aria-label="Nozzle error after a corner, unshaped and shaped"></canvas>
+        <p class="legend"><span><i style="background:var(--bar)"></i>Unshaped</span><span><i style="background:var(--accent)"></i>Shaped</span></p>
+        <p class="note">Detune the shaper from the real f_n to see why robustness matters: the bed's f_n moves with its position and with the part's mass. ZVD tolerates more error than ZV but spreads each corner over a full period.</p>
+      </div>
+      <p>Klipper offers ZV and more robust variants (MZV, ZVD, EI, 2HUMP_EI, 3HUMP_EI) that tolerate error in <span class="tex">f_n</span> and <span class="tex">\zeta</span> at the cost of more smoothing. Robustness matters on a bed slinger because <span class="tex">f_n</span> changes along the Y travel and as the print gets heavier. Klipper measures resonance with an accelerometer (ADXL345 or similar) on the bed for Y and on the toolhead for X, sweeps the excitation frequency, fits each shaper, and reports a maximum recommended acceleration per shaper; above it, corners visibly blur.</p>
+
+      <h3><span class="num">9.6</span>The print rides on the bed</h3>
+      <p>A tall, slender part of mass <span class="tex">m_p</span> with its centre of mass at height <span class="tex">h</span> feels <span class="tex">m_p a</span> at that height, bending it at the base:</p>
+      <div class="eq">M_{\text{base}} = m_p\, a\, h</div>
+      <p>The part is a cantilever whose tip deflects ≈<span class="tex">Fh^3/(3EI)</span>, so the nozzle meets a moving target; thin towers and tall vases print noticeably worse on bed slingers. The same force acts on first-layer adhesion: if <span class="tex">m_p a</span> exceeds what the PEI bond provides, the part slides or pops off mid-print. CoreXY machines avoid both because their bed does not move in X or Y.</p>
+
+      <h3><span class="num">9.7</span>Momentum and the frame</h3>
+      <p>Every newton pushed into the bed pushes the frame the other way. With frame mass <span class="tex">M</span>, the frame recoils at <span class="tex">F/M</span> unless the feet hold it: at 31 N on a 7 kg machine, ≈4.4 m/s², well above what rubber feet on a desk will hold, so fast Y moves rock or walk the printer. That rocking is a low-frequency mode in series with the belt, which is why heavy, wide-footed bed slingers on solid tables print better. Klipper's resonance test shows the difference when you add mass or bolt the printer down.</p>
+
+      <h3><span class="num">9.8</span>Energy and power</h3>
+      <p>Kinetic energy at 300 mm/s is only <span class="tex">\tfrac{1}{2} \times 1.4 \times 0.3^2 \approx 0.06</span> J; peak mechanical power <span class="tex">Fv \approx 31 \times 0.3 \approx 9</span> W. Neither is a limit. The thermal budget belongs to the heaters; the motion budget is set by stiffness, damping and vibration.</p>
+
+      <h3><span class="num">9.9</span>Bed slinger versus CoreXY</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Property</th><th>Switchwire (bed slinger, CoreXZ)</th><th>CoreXY (e.g. Voron 2.4)</th></tr></thead>
+        <tbody>
+          <tr><td>Mass moved in Y</td><td>Bed + part, ≈0.9–1.3 kg</td><td>Toolhead + gantry, much lighter</td></tr>
+          <tr><td>Mass moved in Z</td><td>Gantry + toolhead, against gravity</td><td>Bed (or gantry), slowly</td></tr>
+          <tr><td>Frame</td><td>Open, fewer parts</td><td>Enclosed cube, stiffer box</td></tr>
+          <tr><td>Motion motors</td><td>3</td><td>4–6</td></tr>
+          <tr><td>Tall-part quality</td><td>Limited by part whip</td><td>Unaffected by part motion</td></tr>
+          <tr><td>Main speed limit</td><td>Y resonance and part inertia</td><td>Gantry stiffness and hotend flow</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <!-- ===================== 10 ===================== -->
+    <section class="chapter" id="s10" data-view="overview">
+      <h2><span class="num">10</span> BOM: every part and its job</h2>
+      <p>Quantities come from the official assembly manual, CAD model and Klipper configs (repository state of January 2025). The official BOM generator on vorondesign.com could not be reached, so rows marked CAD are counts from the model; confirm against the official BOM before buying. <strong>Show</strong> highlights the part in the model.</p>
+
+      <h3>Frame and structure</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Part</th><th class="n">Qty</th><th>Source</th><th>Job</th><th></th></tr></thead>
+        <tbody>
+          <tr><td>3060 extrusion, 520 mm</td><td class="n">2</td><td>CAD</td><td>Base rails; stiffest members, carry Y rail</td><td><button class="show" data-show="HFS6-3060-520" data-label="3060 × 520 mm base rails">Show</button></td></tr>
+          <tr><td>3030 extrusion, 400 mm</td><td class="n">2</td><td>CAD</td><td>Uprights carrying Z rails</td><td><button class="show" data-show="HFS6-3030-400" data-label="3030 × 400 mm uprights">Show</button></td></tr>
+          <tr><td>3030 extrusion, 300 mm</td><td class="n">2</td><td>CAD</td><td>Cross members</td><td><button class="show" data-show="HFS6-3030-300" data-label="3030 × 300 mm cross members">Show</button></td></tr>
+          <tr><td>3030 extrusion, 360 mm</td><td class="n">1</td><td>CAD</td><td>Top tie between uprights</td><td><button class="show" data-show="HFS6-3030-360" data-label="3030 × 360 mm top tie">Show</button></td></tr>
+          <tr><td>2020 extrusion, 340 mm</td><td class="n">2</td><td>CAD</td><td>Frame member and X beam</td><td><button class="show" data-show="HFSB5-340" data-label="2020 × 340 mm">Show</button></td></tr>
+          <tr><td>M8×16 BHCS</td><td class="n">8</td><td>Manual</td><td>Blind joints between extrusions</td><td><button class="show" data-show="M8x16 BHCS" data-label="M8×16 blind-joint screws">Show</button></td></tr>
+          <tr><td>Panels (bottom, deck, rear, sides, top)</td><td class="n">set</td><td>DXF</td><td>Shear stiffness, enclosure, mounting</td><td><button class="show" data-show="Panels:1" data-label="Panels">Show</button></td></tr>
+          <tr><td>Printed TPU feet</td><td class="n">4</td><td>CAD</td><td>Isolation from the table</td><td><button class="show" data-show="Foot - TPU" data-label="TPU feet">Show</button></td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Motion</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Part</th><th class="n">Qty</th><th>Source</th><th>Job</th><th></th></tr></thead>
+        <tbody>
+          <tr><td>MGN12H rail, 300 mm, with carriage</td><td class="n">4</td><td>CAD</td><td>Constrain X, Y and both Z sides to one degree of freedom</td><td><button class="show" data-show="MGN12" data-label="MGN12H rails and carriages">Show</button></td></tr>
+          <tr><td>NEMA 17 stepper, 1.8°</td><td class="n">3</td><td>CAD, config</td><td>CoreXZ A and B, Y</td><td><button class="show" data-show="NEMA17" data-label="NEMA 17 steppers">Show</button></td></tr>
+          <tr><td>GT2 20-tooth pulley, 6 mm</td><td class="n">3</td><td>CAD, config</td><td>Torque to belt force; 40 mm per revolution</td><td><button class="show" data-show="GT2 20T" data-label="GT2 20T pulleys">Show</button></td></tr>
+          <tr><td>GT2 belt, 6 mm</td><td class="n">3 runs</td><td>CAD</td><td>X, Z (CoreXZ pair, equal length) and Y</td><td></td></tr>
+          <tr><td>F695 flanged bearing</td><td class="n">≈ 20</td><td>CAD</td><td>Smooth idlers, Y idler, counterweight</td><td><button class="show" data-show="F695" data-label="F695 idler bearings">Show</button></td></tr>
+          <tr><td>M5 shim (DIN 988)</td><td class="n">≈ 19</td><td>CAD</td><td>Space bearings in idler stacks</td><td></td></tr>
+          <tr><td>Key-Bak Super 48 retractor</td><td class="n">1</td><td>Manual</td><td>Counterbalance the Z gantry</td><td><button class="show" data-show="KeyBack|KeyBak|keybak" data-label="Key-Bak counterweight">Show</button></td></tr>
+          <tr><td>Prusa MK3-style Y carriage</td><td class="n">1</td><td>Manual</td><td>Mounts the bed on the Y rail block</td><td><button class="show" data-show="Y-carriage" data-label="Y carriage">Show</button></td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Bed</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Part</th><th class="n">Qty</th><th>Source</th><th>Job</th><th></th></tr></thead>
+        <tbody>
+          <tr><td>MK52-style heated bed, 24 V, magnets</td><td class="n">1</td><td>Manual</td><td>Heater and bed plate in one</td><td><button class="show" data-show="MK52" data-label="MK52 heated bed">Show</button></td></tr>
+          <tr><td>Spring-steel PEI sheet</td><td class="n">1</td><td>Manual</td><td>Removable print surface</td><td><button class="show" data-show="flex-sheet" data-label="Spring-steel PEI sheet">Show</button></td></tr>
+          <tr><td>Bed thermistor (100 kΩ NTC)</td><td class="n">1</td><td>Config</td><td>Temperature feedback</td><td></td></tr>
+          <tr><td>M3×12 FHCS + 6×6×3 spacers</td><td class="n">set</td><td>Manual</td><td>Fix bed to carriage at a set height</td><td><button class="show" data-show="6x6x3t_spacer" data-label="Bed spacers">Show</button></td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Toolhead</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Part</th><th class="n">Qty</th><th>Source</th><th>Job</th><th></th></tr></thead>
+        <tbody>
+          <tr><td>StealthBurner toolhead (printed)</td><td class="n">1</td><td>Manual</td><td>Housing, ducts, mounts</td><td><button class="show" data-show="Stealthburner_Assembly" data-label="StealthBurner">Show</button></td></tr>
+          <tr><td>Clockwork 2 extruder, 50:10 gears</td><td class="n">1</td><td>Config</td><td>Feeds filament with 5:1 torque gain</td><td><button class="show" data-show="CW2_Assembly" data-label="Clockwork 2 extruder">Show</button></td></tr>
+          <tr><td>NEMA 14 pancake stepper (LDO-36STH20 in CAD)</td><td class="n">1</td><td>CAD</td><td>Drives the extruder</td><td><button class="show" data-show="LDO-36STH20" data-label="NEMA 14 pancake stepper">Show</button></td></tr>
+          <tr><td>Hotend (Revo Voron in CAD; V6, Dragon, Rapido alternatives)</td><td class="n">1</td><td>CAD</td><td>Melts filament</td><td><button class="show" data-show="SB TOOLHEAD-Revo Voron" data-label="Revo Voron hotend">Show</button></td></tr>
+          <tr><td>Heater cartridge and thermistor</td><td class="n">1 each</td><td>Config</td><td>Heat and measure the melt zone</td><td></td></tr>
+          <tr><td>Hotend fan, part-cooling fan(s)</td><td class="n">1 + 1–2</td><td>Manual</td><td>Keep heat break cold; freeze extrudate</td><td><button class="show" data-show="4010 Axial Fan|turbine" data-label="Toolhead fans">Show</button></td></tr>
+          <tr><td>Inductive probe (PL-08N or Omron TL-Q5MC)</td><td class="n">1</td><td>Manual</td><td>Z homing and bed mesh</td><td></td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Electronics</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Part</th><th class="n">Qty</th><th>Source</th><th>Job</th><th></th></tr></thead>
+        <tbody>
+          <tr><td>Mean Well LRS-350-24</td><td class="n">1</td><td>Manual</td><td>24 V main supply</td><td><button class="show" data-show="meanwell" data-label="Mean Well LRS-350-24">Show</button></td></tr>
+          <tr><td>Mean Well RS-25-5</td><td class="n">1</td><td>Manual</td><td>5 V supply for the Pi</td><td><button class="show" data-show="MW RS-25" data-label="Mean Well RS-25-5">Show</button></td></tr>
+          <tr><td>Mains inlet</td><td class="n">1</td><td>Manual</td><td>Mains entry and earth bond</td><td><button class="show" data-show="JR Mains Inlet" data-label="Mains inlet">Show</button></td></tr>
+          <tr><td>BTT SKR Mini E3 V2/V3 (or Einsy Rambo)</td><td class="n">1</td><td>Manual, config</td><td>MCU and four TMC drivers</td><td><button class="show" data-show="SKR Mini E3 1.2" data-label="SKR Mini E3">Show</button></td></tr>
+          <tr><td>Raspberry Pi</td><td class="n">1</td><td>Manual</td><td>Klipper host and planner</td><td><button class="show" data-show="Raspberry Pi 3|raspberry_pi|RPi Zero:" data-label="Raspberry Pi">Show</button></td></tr>
+          <tr><td>Mini12864 display + adapter</td><td class="n">1</td><td>Manual</td><td>Local control</td><td><button class="show" data-show="Mini12864|LCD Case" data-label="Mini12864 display">Show</button></td></tr>
+          <tr><td>6020 controller fan</td><td class="n">1</td><td>Manual</td><td>Cools stepper drivers</td><td><button class="show" data-show="6020 Fan" data-label="6020 fans">Show</button></td></tr>
+          <tr><td>Microswitch endstops (KW10)</td><td class="n">2</td><td>Manual, CAD</td><td>X and Y homing (Y may be sensorless)</td><td><button class="show" data-show="CherryZF" data-label="Microswitch endstops">Show</button></td></tr>
+          <tr><td>BAT85 Schottky diode</td><td class="n">1</td><td>Manual</td><td>Protects MCU input from the 24 V probe</td><td></td></tr>
+          <tr><td>Cable chains, 10 × 11 mm</td><td class="n">3</td><td>Manual</td><td>Guide moving wires for X, Y, Z</td><td><button class="show" data-show="10x11 Chain" data-label="Cable chains (S20)">Show</button></td></tr>
+          <tr><td>Wire: 2.5, 1, 0.75, 0.5, 0.25 mm²</td><td class="n">set</td><td>Manual</td><td>Sized to current: PSU, bed, mains, heater, signals</td><td></td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Fasteners (whole machine, CAD instance counts)</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Part</th><th class="n">Approx. qty</th><th>Typical use</th></tr></thead>
+        <tbody>
+          <tr><td>M3 heat-set inserts</td><td class="n">≈ 72</td><td>Durable threads in printed parts</td></tr>
+          <tr><td>M3 SHCS, 8–50 mm</td><td class="n">≈ 125</td><td>Rail mounting, motor mounts, printed assemblies</td></tr>
+          <tr><td>M3 FHCS and BHCS</td><td class="n">≈ 36</td><td>Flush mounting, bed</td></tr>
+          <tr><td>M5 BHCS, 10–30 mm</td><td class="n">≈ 70</td><td>Frame attachments, idlers, panels</td></tr>
+          <tr><td>M5×40 SHCS</td><td class="n">6</td><td>Idler axles, X beam</td></tr>
+          <tr><td>M2×10 self-tapping</td><td class="n">≈ 10</td><td>Endstop switches</td></tr>
+          <tr><td>M3 and M5 T-nuts</td><td class="n">not modelled</td><td>Attach parts to extrusion slots</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Sources</h3>
+      <ul class="sources">
+        <li><a href="https://github.com/VoronDesign/Voron-Switchwire" target="_blank" rel="noopener">Voron Switchwire repository</a>: assembly manual (<code>Manuals/Assembly_Manual_SW.pdf</code>, January 2025), CAD STEP assembly, panel DXFs, Klipper configs for SKR Mini E3 V2, V3 and Einsy Rambo</li>
+        <li><a href="https://github.com/VoronDesign/Voron-Documentation" target="_blank" rel="noopener">Voron Documentation repository</a>: hardware, sourcing and mechanical pages</li>
+        <li><a href="https://docs.vorondesign.com/" target="_blank" rel="noopener">Voron documentation site</a>: wiring guides and sourcing guide</li>
+        <li><a href="https://www.klipper3d.org/Resonance_Compensation.html" target="_blank" rel="noopener">Klipper: resonance compensation</a>: input shaper types and tuning</li>
+      </ul>
+      <p class="note">Not reachable for the source document: the official BOM generator at vorondesign.com/voron_switchwire. Confirm quantities there before ordering.</p>
+
+      <footer class="colophon">
+        <p>Adapted from <em>Voron Switchwire: The Mechanics of a Bed Slinger, Part by Part</em> and its CAD figure supplement. The 3D model is the Switchwire CAD assembly exported from Fusion; colours are applied by part type, belts are drawn from the pulley positions, and cable chains stay at their CAD pose when the axes move. Physics derivations are standard textbook results; numbers marked ≈ are illustrations, not measurements.</p>
+      </footer>
+    </section>
+  </main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+<!-- r147 is the last three.js release that ships the classic (non-module) OrbitControls and GLTFLoader -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/GLTFLoader.js"></script>
+<script>
+  // Equations: KaTeX to native MathML (no fonts or stylesheet needed). Leave the TeX visible if KaTeX is missing.
+  document.querySelectorAll('.tex, .eq').forEach((el) => {
+    const tex = el.textContent;
+    if (window.katex) {
+      try { katex.render(tex, el, { output: 'mathml', displayMode: el.classList.contains('eq'), throwOnError: false }); return; } catch (e) { /* fall through */ }
+    }
+    el.classList.add('tex-src');
+  });
+</script>
+<script src="js/viewer.js"></script>
+<script src="js/widgets.js"></script>
+<script>
+  // Follow the reading position: the [data-view] element nearest the middle of the screen sets the model's view.
+  (function () {
+    const els = [...document.querySelectorAll('[data-view]')];
+    let current = null;
+    function pick() {
+      const mid = innerHeight * 0.45;
+      let best = null;
+      for (const el of els) {
+        const r = el.getBoundingClientRect();
+        if (r.top <= mid) best = el; else break;
+      }
+      const v = (best || els[0]).dataset.view;
+      if (v !== current) { current = v; window.SW && window.SW.view(v); }
+    }
+    let raf = 0;
+    addEventListener('scroll', () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(pick); }, { passive: true });
+    window.SW && window.SW.onReady(pick);
+
+    const wrap = document.getElementById('stage-wrap'), btn = document.getElementById('stage-toggle');
+    btn.addEventListener('click', () => {
+      const collapsed = wrap.classList.toggle('is-collapsed');
+      btn.textContent = collapsed ? 'Show model' : 'Hide model';
+      btn.setAttribute('aria-expanded', String(!collapsed));
+    });
+  })();
+</script>
