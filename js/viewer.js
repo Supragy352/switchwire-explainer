@@ -127,10 +127,14 @@
   const ghostMat = new THREE.MeshStandardMaterial({ transparent: true, opacity: 0.1, depthWrite: false, roughness: 1, metalness: 0 });
   const beltMat = {
     default: new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0 }),
-    a: new THREE.MeshStandardMaterial({ roughness: 0.6, metalness: 0 }),
-    b: new THREE.MeshStandardMaterial({ roughness: 0.6, metalness: 0 }),
-    y: new THREE.MeshStandardMaterial({ roughness: 0.6, metalness: 0 }),
+    // highlighted belts are unlit, so a belt seen edge-on stays its full colour instead of shading to black
+    a: new THREE.MeshBasicMaterial({ toneMapped: false }),
+    b: new THREE.MeshBasicMaterial({ toneMapped: false }),
+    y: new THREE.MeshBasicMaterial({ toneMapped: false }),
   };
+  // soft glow around highlighted belts, so they read against the dark stage and the ghosted machine
+  const haloMat = Object.fromEntries(['a', 'b', 'y'].map((k) => [k,
+    new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.28, depthWrite: false, toneMapped: false })]));
 
   // ---------- model state ----------
   let root = null, fusionRoot = null;
@@ -264,15 +268,26 @@
     ];
   }
   const unitBox = new THREE.BoxGeometry(1, 1, 1);
-  function makeBelt(n, mat) {
+  function makeBelt(n, mat, key) {
     const g = new THREE.Group();
     for (let i = 0; i < n - 1; i++) {
       const m = new THREE.Mesh(unitBox, mat);
       m.matrixAutoUpdate = false;
       m.userData.belt = true;
+      const halo = new THREE.Mesh(unitBox, haloMat[key]); // unit-box axes: length, width, thickness
+      halo.scale.set(1.04, 1.5, 3.2);
+      halo.userData.belt = true;
+      halo.visible = false;
+      m.add(halo);
       g.add(m);
     }
     return g;
+  }
+  // highlighted: thicker (a 1.4 mm belt seen edge-on is under a pixel), unlit and haloed
+  function highlightBelt(g, mat) {
+    const on = !!mat;
+    g.userData.hi = on;
+    g.children.forEach((m) => { if (mat) m.material = mat; m.children[0].visible = on; });
   }
   function layBelt(group, pts3, widthDir) {
     const a = new THREE.Vector3(), b = new THREE.Vector3(), dir = new THREE.Vector3(), n = new THREE.Vector3();
@@ -280,13 +295,13 @@
       a.set(...pts3[i]); b.set(...pts3[i + 1]);
       dir.subVectors(b, a); const len = dir.length(); dir.normalize();
       n.crossVectors(dir, widthDir).normalize();
-      m.matrix.makeBasis(dir.clone().multiplyScalar(len + 0.1), widthDir.clone().multiplyScalar(0.6), n.clone().multiplyScalar(0.14));
+      m.matrix.makeBasis(dir.clone().multiplyScalar(len + 0.1), widthDir.clone().multiplyScalar(0.6), n.clone().multiplyScalar(group.userData.hi ? 0.45 : 0.14));
       m.matrix.setPosition(a.clone().add(b).multiplyScalar(0.5));
     });
   }
   function buildBelts() {
     belts = {
-      a: makeBelt(13, beltMat.default), b: makeBelt(13, beltMat.default), y: makeBelt(8, beltMat.default),
+      a: makeBelt(13, beltMat.default, 'a'), b: makeBelt(13, beltMat.default, 'b'), y: makeBelt(8, beltMat.default, 'y'),
     };
     const g = new THREE.Group();
     g.add(belts.a, belts.b, belts.y);
@@ -300,7 +315,8 @@
     layBelt(belts.y, yPath(pose.y).map(([x, y]) => [x, y, 7.0]), Z);
   }
   function ghostBelts() {
-    for (const k of ['a', 'b', 'y']) belts[k].children.forEach((m) => (m.material = ghostMat));
+    for (const k of ['a', 'b', 'y']) { belts[k].children.forEach((m) => (m.material = ghostMat)); highlightBelt(belts[k], null); }
+    updateBelts();
   }
   function paintBelts() {
     const xz = ['kinematics', 'counterweight', 'belts'].includes(currentView);
@@ -308,11 +324,14 @@
     beltMat.a.color.set(css('--motor-a')).convertSRGBToLinear();
     beltMat.b.color.set(css('--motor-b')).convertSRGBToLinear();
     beltMat.y.color.set(css('--y-axis')).convertSRGBToLinear();
+    for (const k of ['a', 'b', 'y']) haloMat[k].color.copy(beltMat[k].color);
     // uncoloured belts ghost along with everything else when a view focuses on some parts
     const plain = VIEWS[currentView] && VIEWS[currentView].focus ? ghostMat : beltMat.default;
-    belts.a.children.forEach((m) => (m.material = xz ? beltMat.a : plain));
-    belts.b.children.forEach((m) => (m.material = xz ? beltMat.b : plain));
-    belts.y.children.forEach((m) => (m.material = y ? beltMat.y : plain));
+    for (const [k, on] of [['a', xz], ['b', xz], ['y', y]]) {
+      highlightBelt(belts[k], on ? beltMat[k] : null);
+      if (!on) belts[k].children.forEach((m) => (m.material = plain));
+    }
+    updateBelts();
   }
 
   // ---------- pose ----------
