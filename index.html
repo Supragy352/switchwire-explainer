@@ -161,6 +161,16 @@ code { background: var(--surface); border: 1px solid var(--line); padding: 0.05e
   color: var(--muted); background: none; border: 0; border-bottom: 1px dotted var(--muted); padding: 0; cursor: pointer;
 }
 .view-link:hover { color: var(--accent); border-color: var(--accent); }
+/* exploded-view control: a toggle plus a scrubber */
+.explode {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.3rem 0.9rem; align-items: center;
+  margin: 0.2rem 0 1.2rem; padding: 0.6rem 0.8rem; background: var(--surface);
+  border: 1px solid var(--line); border-left: 3px solid var(--accent);
+}
+.explode button { grid-row: 1 / span 2; min-width: 6.5rem; }
+.explode button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.explode label { display: flex; justify-content: space-between; gap: 0.5rem; font: 600 0.82rem/1.2 var(--font-display); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.explode output { font: 600 0.82rem/1.2 var(--font-data); color: var(--ink); white-space: nowrap; }
 /* bigger touch targets without changing the layout: sliders get a taller hit box, small buttons an invisible halo */
 @media (pointer: coarse) {
   input[type="range"] { height: 2.75rem; }
@@ -312,6 +322,11 @@ footer.colophon { font-size: var(--step--1); color: var(--muted); border-top: 1p
       <p>That is the resolution of commands, not of position: belt stretch, pulley eccentricity and microstep torque (Section 5) limit real accuracy. The official SKR configuration uses 32 microsteps, halving the increment to 6.25 µm. The Y axis is exactly this arrangement: motor at the rear, belt loop under the bed, idler at the front, belt ends clamped to the bed carriage.</p>
 
       <h3 data-view="kinematics"><span class="num">2.2</span>The CoreXZ idea</h3>
+      <div class="explode" data-explode="gantry">
+        <button type="button" aria-pressed="false" aria-controls="xp-gantry">Explode</button>
+        <label for="xp-gantry"><span>Pull the CoreXZ gantry apart</span><output for="xp-gantry">0 %</output></label>
+        <input type="range" id="xp-gantry" min="0" max="100" step="1" value="0">
+      </div>
       <p>Both motors are fixed to the frame. Each belt climbs from its motor to a fixed idler at the top, crosses the machine, drops to an idler on the moving gantry and ends at the X carriage. It is CoreXY rotated 90° to stand vertically. With belt displacements <span class="tex">a</span> and <span class="tex">b</span> from motors A and B:</p>
       <div class="eq">\Delta X = \tfrac{1}{2}(\Delta a + \Delta b), \qquad \Delta Z = \tfrac{1}{2}(\Delta a - \Delta b)</div>
       <p>and the firmware inverts it:</p>
@@ -389,6 +404,11 @@ footer.colophon { font-size: var(--step--1); color: var(--muted); border-top: 1p
       <p>The X beam is a 2020 spanning ≈340 mm between the Z carriages. Simply supported with the toolhead at mid-span, <span class="tex">k = 48EI/L^3</span>; with <span class="tex">E \approx 69</span> GPa and <span class="tex">I \approx 7 \times 10^3</span> mm⁴, <span class="tex">k \approx 6 \times 10^5</span> N/m and a 0.5 kg toolhead resonates near 170 Hz, well above the Y axis. The weaker direction is torsion: the toolhead hangs in front of the beam, and a 2020's torsional stiffness is far below its bending stiffness.</p>
 
       <h3><span class="num">3.3</span>Joints, fasteners and preload</h3>
+      <div class="explode" data-explode="frame">
+        <button type="button" aria-pressed="false" aria-controls="xp-frame">Explode</button>
+        <label for="xp-frame"><span>Pull the frame apart at its joints</span><output for="xp-frame">0 %</output></label>
+        <input type="range" id="xp-frame" min="0" max="100" step="1" value="0">
+      </div>
       <p>The frame uses blind joints: an M8×16 button-head screw passes through an access hole in one extrusion into the tapped end of the next, eight in total. The joint is clamped, not pinned; its stiffness is friction between faces under bolt tension:</p>
       <div class="eq">T \approx K F d</div>
       <p>With nut factor <span class="tex">K \approx 0.2</span>, an M8 at 10 N·m gives <span class="tex">F \approx 6</span> kN of clamp. While the faces never slip the joint is nearly rigid; once they slip, the frame can rack out of square. Elsewhere the BOM is dozens of M3 and M5 screws, T-nuts, and ≈70 brass heat-set inserts: threads cut straight into ABS strip and creep, while a knurled insert spreads the load and gives a durable metal thread.</p>
@@ -467,6 +487,11 @@ footer.colophon { font-size: var(--step--1); color: var(--muted); border-top: 1p
       <p>The drive pulley is fixed to the motor shaft with grub screws against the shaft's flat. Its tooth count sets the gearing: fewer teeth give more force per unit torque (<span class="tex">F = \tau/r</span>) and finer resolution, but fewer teeth engaged and a tighter bend. With 20 teeth and ≈180° of wrap, about 10 teeth engage. Pulley eccentricity is a hidden error source: a bore off-centre by <span class="tex">e</span> makes the effective radius vary once per revolution, printing faint banding every 40 mm for a 20T pulley.</p>
 
       <h3 data-view="kinematics"><span class="num">4.5</span>Idlers</h3>
+      <div class="explode" data-explode="idler">
+        <button type="button" aria-pressed="false" aria-controls="xp-idler">Explode</button>
+        <label for="xp-idler"><span>Pull an upper idler stack apart</span><output for="xp-idler">0 %</output></label>
+        <input type="range" id="xp-idler" min="0" max="100" step="1" value="0">
+      </div>
       <p>Idlers redirect the belt, either toothed (teeth facing the belt teeth) or smooth (running on the flat back). Most are flanged ball bearings, F695 and F623 being common, stacked or pressed into a toothed shell. The bearing carries twice the tension times the sine of half the wrap angle:</p>
       <div class="eq">F_{\text{bearing}} = 2T\sin\!\left(\frac{\theta}{2}\right)</div>
       <p>At 180° that is <span class="tex">2T</span>: about 18 N at ≈9 N of tension, the figure Voron's tuning guide gives for its A/B belts (110 Hz over a 150 mm span, about 2 lb, at the low end of the range), well within a small bearing's rating but enough to show as wear on a poor bearing or a flexing shaft. Flanges keep the belt from walking off; a belt that always rubs one flange points to a misaligned pulley or idler. <button class="view-link" type="button" data-show="Upper Block - Left:1|Upper Block - Right:1" data-label="Upper idlers: paired F695 (S12)">Show the upper idlers</button></p>
@@ -530,6 +555,11 @@ footer.colophon { font-size: var(--step--1); color: var(--muted); border-top: 1p
       <p>A stepper rotor is a mass on a magnetic spring; at some speeds the step frequency couples with its natural oscillation and the motor loses torque or stalls. TMC drivers damp this differently in StealthChop (voltage mode: quiet, but loses torque and can skip at speed) and SpreadCycle (current mode: louder, more robust). Many Voron configs use SpreadCycle on the motion axes.</p>
 
       <h3><span class="num">5.6</span>The four motors on the Switchwire</h3>
+      <div class="explode" data-explode="motor">
+        <button type="button" aria-pressed="false" aria-controls="xp-motor">Explode</button>
+        <label for="xp-motor"><span>Pull motor A off its mount</span><output for="xp-motor">0 %</output></label>
+        <input type="range" id="xp-motor" min="0" max="100" step="1" value="0">
+      </div>
       <div class="table-wrap"><table>
         <thead><tr><th>Motor</th><th>Drives</th><th>Why it matters</th><th></th></tr></thead>
         <tbody>
@@ -614,6 +644,11 @@ footer.colophon { font-size: var(--step--1); color: var(--muted); border-top: 1p
       <p>The current release uses the Voron StealthBurner toolhead with a Clockwork 2 extruder (older revisions used the Afterburner). Its job is to push filament at a controlled rate, melt it in a small, well-defined zone and freeze it again the instant it leaves the nozzle, while staying as light as possible because it rides the CoreXZ gantry.</p>
 
       <h3><span class="num">7.1</span>What is on the toolhead</h3>
+      <div class="explode" data-explode="toolhead">
+        <button type="button" aria-pressed="false" aria-controls="xp-toolhead">Explode</button>
+        <label for="xp-toolhead"><span>Pull the toolhead apart</span><output for="xp-toolhead">0 %</output></label>
+        <input type="range" id="xp-toolhead" min="0" max="100" step="1" value="0">
+      </div>
       <div class="table-wrap"><table>
         <thead><tr><th>Part</th><th>Role</th><th>Notes</th></tr></thead>
         <tbody>
@@ -669,6 +704,11 @@ footer.colophon { font-size: var(--step--1); color: var(--muted); border-top: 1p
       <p>The electronics turn mains into regulated 24 V and 5 V, drive four steppers and two heaters, read thermistors and switches, and run Klipper split between a Raspberry Pi (the planner) and a microcontroller board (the real-time executor). The official design targets a BTT SKR Mini E3 (V2 or V3) or, for builders reusing Prusa parts, an Einsy Rambo.</p>
 
       <h3><span class="num">8.1</span>Power path</h3>
+      <div class="explode" data-explode="electronics">
+        <button type="button" aria-pressed="false" aria-controls="xp-electronics">Explode</button>
+        <label for="xp-electronics"><span>Drop the boards off their mounts</span><output for="xp-electronics">0 %</output></label>
+        <input type="range" id="xp-electronics" min="0" max="100" step="1" value="0">
+      </div>
       <div class="table-wrap"><table>
         <thead><tr><th>Part</th><th>Spec</th><th>Role</th><th></th></tr></thead>
         <tbody>

@@ -28,6 +28,6 @@ claude.ai Artifact host adds at publish time (KaTeX refuses to run in quirks mod
 ## Files
 
 - `index.html`: content, styles, KaTeX rendering, scroll-to-view sync
-- `js/viewer.js`: model loading, axis poses, belts drawn from pulley positions, views, highlight, part picking
+- `js/viewer.js`: model loading, axis poses, belts drawn from pulley positions, views, six exploded views, highlight, part picking
 - `js/widgets.js`: CoreXZ driver, microstep, belt pluck, bed heat-up, wire drop, Y resonance, input shaper
 - `models/switchwire.b64.txt`: the full CAD assembly (781 parts, ~730k triangles)

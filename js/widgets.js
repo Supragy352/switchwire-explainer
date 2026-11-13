@@ -367,6 +367,33 @@
     update();
   })();
 
+  // ============ exploded views: toggle animates, slider scrubs ============
+  document.querySelectorAll('[data-explode]').forEach((root) => {
+    const name = root.dataset.explode, input = $('input', root), btn = $('button', root), outEl = $('output', root);
+    let anim = 0;
+    function set(v, push = true) {
+      input.value = Math.round(v);
+      outEl.textContent = `${input.value} %`;
+      btn.textContent = v > 50 ? 'Collapse' : 'Explode';
+      btn.setAttribute('aria-pressed', String(v > 50));
+      if (push && window.SW) window.SW.explode(name, v / 100);
+    }
+    input.addEventListener('input', () => { cancelAnimationFrame(anim); set(+input.value); });
+    btn.addEventListener('click', () => {
+      cancelAnimationFrame(anim);
+      const v0 = +input.value, v1 = v0 > 50 ? 0 : 100, t0 = performance.now();
+      const dur = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 1100;
+      const step = (t) => {
+        const u = dur ? Math.min(1, (t - t0) / dur) : 1, e = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+        set(v0 + (v1 - v0) * e);
+        if (u < 1) anim = requestAnimationFrame(step);
+      };
+      anim = requestAnimationFrame(step);
+    });
+    // the viewer collapses the explosion when the reader moves to another view
+    document.addEventListener('sw:collapse', (e) => { if (e.detail === name) { cancelAnimationFrame(anim); set(0, false); } });
+  });
+
   // ============ BOM "show in model" + subsystem cards ============
   document.querySelectorAll('[data-show]').forEach((el) => {
     // 38 table buttons all read "Show"; give screen readers the part name

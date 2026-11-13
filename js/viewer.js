@@ -319,8 +319,13 @@
   const clamp = (v, [lo, hi]) => Math.max(lo, Math.min(hi, v));
   function setPose(p) {
     for (const k of ['x', 'y', 'z']) if (p[k] !== undefined) pose[k] = clamp(p[k], LIMIT[k]);
-    if (!root) return;
+    if (root) place();
+  }
+  // Position everything that moves: axis poses, exploded-view offsets on top, spinning pulleys.
+  function place() {
+    for (const [o, e] of expl) o.position.copy(e.base);
     for (const m of movers) m.o.position.copy(m.base).addScaledVector(m.unit, pose[m.axis]);
+    for (const [o, e] of expl) if (o.matrixAutoUpdate) o.position.addScaledVector(e.off, explodeT);
     // belt displacement per motor (CoreXZ: a = X + Z, b = X - Z) -> pulley angle = s / r
     const travel = { a: pose.x + pose.z, b: pose.x - pose.z, y: -pose.y };
     const T = new THREE.Matrix4(), Rm = new THREE.Matrix4(), Ti = new THREE.Matrix4();
@@ -329,10 +334,95 @@
       Ti.makeTranslation(-s.pivot.x, -s.pivot.y, -s.pivot.z);
       Rm.makeRotationAxis(s.axis, travel[s.key] / R);
       s.o.matrix.copy(T).multiply(Rm).multiply(Ti).multiply(s.base);
+      const e = expl.get(s.o); // spinners have matrixAutoUpdate off, so explode them through the matrix
+      if (e) { const m = s.o.matrix.elements; m[12] += e.off.x * explodeT; m[13] += e.off.y * explodeT; m[14] += e.off.z * explodeT; }
     }
     updateBelts();
+    belts.group.visible = explodeT === 0; // belts are drawn from pulley positions an explosion breaks
     root.updateMatrixWorld(true);
     requestRender();
+  }
+
+  // ---------- exploded views ----------
+  // Offsets in Fusion cm at full explosion, along Fusion axes. A child's offset adds to its parent's.
+  const EXPLODE = {
+    toolhead: {
+      'Stealthburner_Assembly:1': [0, -6, 0], 'Stealthburner_Fans:1': [0, -2, 0], 'LEDs:1': [0, -2.5, 0],
+      'SB TOOLHEAD-Revo Voron:1': [0, -2.5, 0], 'Toolhead Revo Voron Front:1': [0, -2.5, 0],
+      'P6 Assembly (RevC):1': [0, 0, -5], 'PTFE Tube Revo Voron 29.8:1': [0, 0, 2.5],
+      'CW2_Assembly:1': [0, 0, 6], 'LDO-36STH20:1': [0, 3, 2], 'BMG_Extruder_Hardware:1': [0, -2.5, 0],
+      'ADXL_Assembly - Generic:1': [-5, -3, -3],
+    },
+    idler: {
+      // two idler stacks on one M5 bolt: lift them out of the block, then spread along the shaft
+      'M5 1mm Spacer:5': [0, -3.3, 5], 'F695-2RS v1 (1):3': [0, -2.4, 5], 'F695-2RS v1 (2):3': [0, -1.2, 5],
+      'M5 1mm Spacer:6': [0, -0.6, 5], 'M5 1mm Spacer:7': [0, -0.3, 5], 'F695-2RS v1 (1):4': [0, 0.6, 5],
+      'F695-2RS v1 (2):4': [0, 1.8, 5], 'M5 1mm Spacer:8': [0, 2.4, 5], 'M5x40 SHCS (1):1': [0, -9, 5],
+    },
+    gantry: {
+      'X Motor:1': [-6, 0, -5], 'Z Motor:1': [6, 0, -5],
+      'Upper Block - Left:1': [-4, 0, 4], 'Upper Block - Right:1': [4, 0, 4],
+      'XZ Block - Left:1': [-7, 0, 0], 'XZ Block - Right:1': [7, 0, 0],
+      'Z Bearing Block - Left v3:1': [-3, 6, 0], 'Z Bearing Block - Right:1': [3, 6, 0], 'XZ Cable Cover:1': [3, 6, 4],
+      'MGN12 LINEAR GUIDE SUBASSEMBLY, 12H v1 (3):1': [0, -4, 0],
+      ...Object.fromEntries(['X Carriage 2.4 v9:1', 'Stealthburner_Assembly:1', 'CW2_Assembly:1', 'ADXL_Assembly - Generic:1',
+        'SB TOOLHEAD-Revo Voron:1'].map((n) => [n, [0, -9, 0]])),
+    },
+    motor: {
+      'NEMA17 (Black) v3:3': [0, -8, 0], 'GT2 20T 6mm Powge v2:3': [0, -4, 0],
+      'M3x30 SHCS (6):1': [0, 5, 0], 'M3x30 SHCS (6):2': [0, 5, 0], 'M3x30 SHCS (6):3': [0, 5, 0], 'M3x30 SHCS (6):4': [0, 5, 0],
+      'Tensioner:2': [0, 0, -4], 'M3x40 SHCS:2': [0, 0, -8], 'M3 Threaded Insert (3):1': [0, 0, -2],
+      'M5x16 BHCS (1):1': [-4, 0, 0], 'M5x16 BHCS (1):2': [-4, 0, 0],
+    },
+    electronics: {
+      // boards drop off the printed mounts on the underside of the deck
+      'MW RS-25 v1:1': [0, 0, -6], 'Raspberry Pi 3 v1:1': [0, 0, -6], 'BTT SKR MINI E3 V1.2 v2:1': [0, 0, -6],
+      'RPi Zero:1': [0, 0, -4], 'meanwell_lrs-350-24_UPDATED v1:1': [0, 0, -8],
+      '6020 Fan:1': [0, -6, 0], '6020 Fan (optional) (1):1': [0, -6, 0],
+    },
+    frame: {
+      // verticals and base rails move apart in X, top and cross members in Z; each M8 blind-joint
+      // screw stays on the axis of its joint, halfway across the gap
+      'HFS6-3030-400:1': [-5, 0, 0], 'HFS6-3030-400:2': [5, 0, 0],
+      'MGN12 LINEAR GUIDE SUBASSEMBLY, 12H v1:1': [-5, 0, 0], 'MGN12 LINEAR GUIDE SUBASSEMBLY, 12H v1 (1):1': [5, 0, 0],
+      'Z Carriage Stop:1': [-5, 0, 0], 'Z Carriage Stop:2': [5, 0, 0], 'Z Carriage Stop:3': [5, 0, 0],
+      'M5x10 BHCS (6):1': [5, 0, 0], 'M5x10 BHCS (7):1': [5, 0, 0], 'M5x10 BHCS (8):1': [-5, 0, 0],
+      'HFS6-3030-360:1': [0, 0, 8], 'M8x16 BHCS:1': [-5, 0, 4], 'M8x16 BHCS:2': [5, 0, 4],
+      'HFS6-3060-520:1': [-5, 0, -8], 'HFS6-3060-520:2': [5, 0, -8],
+      'M8x16 BHCS:7': [-5, 0, -4], 'M8x16 BHCS:8': [5, 0, -4],
+      'Foot - TPU (2):1': [-5, 0, -11], 'Foot - TPU (3):1': [-5, 0, -11], 'Foot - TPU:1': [5, 0, -11], 'Foot - TPU (1):1': [5, 0, -11],
+      'HFS6-3030-300:1': [0, 0, -8], 'HFS6-3030-300:2': [0, 0, -8],
+      'M8x16 BHCS:3': [2.5, 0, -8], 'M8x16 BHCS:4': [2.5, 0, -8], 'M8x16 BHCS:5': [-2.5, 0, -8], 'M8x16 BHCS:6': [-2.5, 0, -8],
+      'HFSB5-340:1': [0, 0, -4], 'M5x10 BHCS (8):2': [0, 0, -6], 'M5x10 BHCS (8):3': [0, 0, -6],
+    },
+  };
+  const ebase = new Map(); // object -> its unexploded local position
+  const expl = new Map();  // object -> { base, off (local, at t = 1) } for the active set
+  let exploded = null, explodeT = 0;
+  function explode(name, t) {
+    if (!root) { readyCbs.push(() => explode(name, t)); return; }
+    const def = EXPLODE[name];
+    if (!def) return;
+    if (exploded !== name) {
+      explodeT = 0; place(); // settle the previous set at its base before measuring
+      expl.clear();
+      for (const [n, v] of Object.entries(def)) for (const o of named(n)) {
+        if (!ebase.has(o)) ebase.set(o, o.position.clone());
+        const p = o.parent, w0 = o.getWorldPosition(new THREE.Vector3());
+        const off = p.worldToLocal(w0.clone().add(F(...v))).sub(p.worldToLocal(w0.clone()));
+        expl.set(o, { base: ebase.get(o), off });
+      }
+      exploded = name;
+    }
+    if (currentView !== 'x-' + name) view('x-' + name); // also after a collapse sent the camera elsewhere
+    explodeT = Math.max(0, Math.min(1, t));
+    place();
+  }
+  function collapse() {
+    if (!exploded || explodeT === 0) return;
+    const name = exploded;
+    explodeT = 0; place();
+    document.dispatchEvent(new CustomEvent('sw:collapse', { detail: name }));
   }
 
   // ---------- views ----------
@@ -352,6 +442,13 @@
     extruder:      { cam: [14, -30, 30], at: [0, -7, 21], follow: true, hide: [...GROUPS_HIDDEN_OPEN, 'Stealthburner_Assembly:1'], focus: ['CW2_Assembly:1'], label: 'Clockwork 2 extruder (S17)' },
     electronics:   { cam: [32, -60, 62], at: [0, -9, 3], hide: [...GROUPS_HIDDEN_OPEN, 'Y Axis Assembly:1', '10x11 Chain Y:1'], focus: ['Electronics:1'], label: 'Electronics bay under the bed (S18)' },
     chains:        { cam: [-75, 110, 60], at: [0, 0, 20], hide: GROUPS_HIDDEN_OPEN, focus: ['10x11 Chain'], label: 'Cable chains from the rear (S20)' },
+    // exploded views (camera framed for the parts at full explosion)
+    'x-toolhead':    { cam: [45, -40, 30], at: [0, -12, 19], fit: true, hide: GROUPS_HIDDEN_OPEN, focus: MOVE.x, label: 'Toolhead, exploded (S15–S17)' },
+    'x-idler':       { cam: [-2, -26, 60], at: [-16, -4, 50], fit: true, hide: GROUPS_HIDDEN_OPEN, focus: ['Upper Block - Left:1'], label: 'Upper idler stack, exploded (S12)' },
+    'x-gantry':      { cam: [60, -125, 50], at: [0, -3, 26], fit: true, hide: GROUPS_HIDDEN_OPEN, focus: ['Gantry:1'], label: 'CoreXZ gantry, exploded (S3)' },
+    'x-motor':       { cam: [-48, -48, 22], at: [-18, -6, 7], fit: true, hide: GROUPS_HIDDEN_OPEN, focus: ['X Motor:1'], label: 'Motor A and its mount, exploded (S11)' },
+    'x-electronics': { cam: [35, -80, -30], at: [0, -10, 1], fit: true, hide: [...GROUPS_HIDDEN_OPEN, 'Y Axis Assembly:1', '10x11 Chain Y:1'], focus: ['Electronics:1'], label: 'Electronics bay from below, exploded (S18)' },
+    'x-frame':       { cam: [95, -135, 70], at: [0, -7, 22], fit: true, hide: [...GROUPS_HIDDEN_OPEN, 'Y Axis Assembly:1', 'Electronics:1', 'Front Grill:1', 'Rear Grill:1', '10x11 Chain', 'Gantry:1', 'Z Chain Lower Mount:1', 'Counterweight:1'], focus: ['Frame:1'], label: 'Frame and blind joints, exploded (S5)' },
   };
 
   // Highlighted copies of materials (a red emissive tint), so even black parts stand out.
@@ -391,6 +488,7 @@
     if (!v) return;
     // re-entering the current view (widget hover, same-view scroll) must not throw away the reader's orbit
     if (root && name === currentView && !instant && !shown) return;
+    if (exploded && name !== 'x-' + exploded) collapse();
     currentView = name;
     shown = false;
     labelEl.textContent = v.label;
@@ -400,10 +498,32 @@
     applyFocus(v.focus ? matching(v.focus) : []);
     paintBelts();
     const off = followOffset(v);
-    const at = F(...v.at).add(off);
-    const pos = F(...v.cam).add(off).sub(at).multiplyScalar(Math.max(1, REF_ASPECT / camera.aspect)).add(at);
-    if (instant) { camera.position.copy(pos); controls.target.copy(at); requestRender(); }
+    let at = F(...v.at).add(off);
+    let pos = F(...v.cam).add(off).sub(at).multiplyScalar(Math.max(1, REF_ASPECT / camera.aspect)).add(at);
+    if (v.fit) [pos, at] = fitExploded(v, pos.sub(at).normalize());
+    if (instant) { tweens.length = 0; camera.position.copy(pos); controls.target.copy(at); requestRender(); }
     else flyTo(pos, at);
+  }
+
+  // Frame the focus parts as they sit at full explosion, looking along dir.
+  function fitExploded(v, dir) {
+    const keep = explodeT;
+    explodeT = 1; place();
+    const box = new THREE.Box3();
+    matching(v.focus).forEach((o) => box.expandByObject(o));
+    explodeT = keep; place();
+    // smallest distance along dir that keeps all eight box corners inside the frustum
+    const c = box.getCenter(new THREE.Vector3());
+    const right = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 1, 0)).negate().normalize();
+    const up = new THREE.Vector3().crossVectors(right, dir.clone().negate());
+    const tanV = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)), tanH = tanV * camera.aspect;
+    let d = 0;
+    for (let i = 0; i < 8; i++) {
+      const p = new THREE.Vector3(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z).sub(c);
+      const z = p.dot(dir);
+      d = Math.max(d, z + Math.abs(p.dot(right)) / tanH, z + Math.abs(p.dot(up)) / tanV);
+    }
+    return [c.clone().addScaledVector(dir, d * 1.12), c];
   }
 
   // Focus arbitrary parts by name (BOM rows): ghost the rest and frame them.
@@ -411,6 +531,7 @@
     if (!root) { readyCbs.push(() => show(substrs, label)); return; }
     const objs = matching(substrs).filter((o) => !HIDE_ALWAYS.includes(o.userData.fname));
     if (!objs.length) return;
+    collapse();
     shown = true;
     pickEl.hidden = true;
     setHidden(GROUPS_HIDDEN_OPEN.filter((g) => !substrs.some((s) => g.includes(s))));
@@ -466,6 +587,7 @@
     setPose,
     view,
     show,
+    explode,
     onReady(cb) { root ? cb() : readyCbs.push(cb); },
   };
   scene.background = new THREE.Color(css('--stage'));
