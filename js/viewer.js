@@ -8,19 +8,23 @@
   const statusEl = stage.querySelector('.stage-status');
   const labelEl = stage.querySelector('.stage-label');
   const pickEl = stage.querySelector('.stage-pick');
+  const hintEl = stage.querySelector('.stage-hint');
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
   // Fusion cm (x, y, z) -> three.js world metres (x, z, -y)
   const F = (x, y, z) => new THREE.Vector3(x / 100, z / 100, -y / 100);
 
+  // Fail before the 6 MB download if anything the loader needs is missing (CDN down, Safari < 16.4).
+  // window.SW stays undefined; every caller checks for it.
+  const unavailable = (why) => { statusEl.textContent = `The 3D model is unavailable (${why}). The text and widgets still work.`; };
+  if (!window.THREE || !THREE.OrbitControls || !THREE.GLTFLoader) return unavailable('three.js did not load');
+  if (!('DecompressionStream' in window)) return unavailable('this browser is too old to unpack it');
   let renderer;
   try {
     renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   } catch (e) {
-    statusEl.textContent = 'This browser could not start WebGL, so the 3D model is unavailable. The text and widgets still work.';
-    window.SW = stub();
-    return;
+    return unavailable('this browser could not start WebGL');
   }
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.outputEncoding = THREE.sRGBEncoding;
@@ -29,7 +33,7 @@
 
   const scene = new THREE.Scene();
   const pmrem = new THREE.PMREMGenerator(renderer);
-  // Minimal studio environment so metal parts have something to reflect (RoomEnvironment is module-only in r149)
+  // Minimal studio environment so metal parts have something to reflect (RoomEnvironment isn't in the r147 classic build)
   const env = new THREE.Scene();
   env.add(new THREE.Mesh(new THREE.BoxGeometry(10, 10, 10), new THREE.MeshBasicMaterial({ color: 0x3c4045, side: THREE.BackSide })));
   [[0, 4.9, 0, -Math.PI / 2, 0], [4.9, 1, 1, 0, -Math.PI / 2], [-3, 2, 4.9, 0, Math.PI]].forEach(([x, y, z, rx, ry]) => {
@@ -37,6 +41,7 @@
     m.position.set(x, y, z); m.rotation.set(rx, ry, 0); env.add(m);
   });
   scene.environment = pmrem.fromScene(env, 0.04).texture;
+  pmrem.dispose();
   const sun = new THREE.DirectionalLight(0xffffff, 0.9);
   sun.position.set(1.5, 2.5, 2);
   scene.add(sun, new THREE.HemisphereLight(0xffffff, 0x30343a, 0.35));
@@ -48,12 +53,29 @@
   controls.target.copy(F(0, -5, 22));
   controls.minDistance = 0.08;
   controls.maxDistance = 4;
+  controls.listenToKeyEvents(canvas); // arrow keys pan when the canvas has focus
+
+  // Touch: one finger must still scroll the page past the sticky stage. A tap arms the
+  // controls; scrolling the page (by touching the text) disarms them again.
+  const coarse = matchMedia('(pointer: coarse)').matches;
+  function armTouch(on) {
+    controls.enabled = on;
+    canvas.style.touchAction = on ? 'none' : 'pan-y'; // OrbitControls sets 'none' in its constructor
+    stage.classList.toggle('is-armed', on);
+    hintEl.textContent = on ? 'Drag to orbit · pinch to zoom · scroll the text to let go' : 'Tap the model to rotate it';
+  }
+  if (coarse) {
+    armTouch(false);
+    addEventListener('scroll', () => controls.enabled && armTouch(false), { passive: true });
+  }
 
   function applyTheme() {
+    glowCache.forEach((m) => m.dispose());
     glowCache.clear(); // accent differs per theme
     scene.background = new THREE.Color(css('--stage'));
     ghostMat.color.set(css('--ghost')).convertSRGBToLinear();
     beltMat.default.color.set(css('--belt')).convertSRGBToLinear();
+    if (root) { applyFocus(lastFocus.objs, lastFocus.highlight); shown ? ghostBelts() : paintBelts(); }
     requestRender();
   }
 
@@ -73,6 +95,7 @@
     if (active) requestRender();
   }
   controls.addEventListener('change', requestRender);
+  canvas.addEventListener('webglcontextrestored', requestRender);
   new ResizeObserver(() => {
     const w = canvas.clientWidth, h = canvas.clientHeight;
     if (!w || !h) return;
@@ -114,8 +137,9 @@
   const byName = new Map();      // original Fusion name -> [Object3D]
   const meshes = [];
   const pose = { x: 0, y: 0, z: 0 };
-  let movers = [], spinners = [], belts = null, beltColoring = false;
-  let currentView = 'overview';
+  let movers = [], spinners = [], belts = null;
+  let currentView = 'overview', shown = false;
+  let lastFocus = { objs: [], highlight: false };
   const readyCbs = [];
 
   const MOVE = {
@@ -142,14 +166,17 @@
     try {
       const res = await fetch(url, { cache: 'no-cache' });
       if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
-      const total = +res.headers.get('content-length') || 8.4e6;
+      // With Content-Encoding (GitHub Pages gzips text) Content-Length is the compressed size, not what we read
+      const total = res.headers.get('content-encoding') ? 0 : +res.headers.get('content-length');
       const reader = res.body.getReader();
       const chunks = []; let got = 0;
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
         chunks.push(value); got += value.length;
-        statusEl.textContent = `Loading the CAD model… ${Math.min(99, Math.round((got / total) * 100))}%`;
+        statusEl.textContent = total
+          ? `Loading the CAD model… ${Math.min(99, Math.round((got / total) * 100))}%`
+          : `Loading the CAD model… ${(got / 1e6).toFixed(1)} MB`;
       }
       statusEl.textContent = 'Unpacking 730 000 triangles…';
       const b64 = atob((await new Blob(chunks).text()).trim());
@@ -179,7 +206,6 @@
       if (o.isMesh) { o.userData.mat = o.material; meshes.push(o); }
     });
     fusionRoot = named('Switchwire')[0];
-    // GLTFLoader may wrap a mesh node in a Group; name lookup must still find the mesh's owner
     HIDE_ALWAYS.forEach((n) => named(n).forEach((o) => (o.visible = false)));
     scene.add(root);
     root.updateMatrixWorld(true);
@@ -273,9 +299,12 @@
     layBelt(belts.b, corexzPath(-1, pose.x, pose.z).map(([x, z]) => [x, -1.9, z]), Y);
     layBelt(belts.y, yPath(pose.y).map(([x, y]) => [x, y, 7.0]), Z);
   }
+  function ghostBelts() {
+    for (const k of ['a', 'b', 'y']) belts[k].children.forEach((m) => (m.material = ghostMat));
+  }
   function paintBelts() {
-    const xz = beltColoring || ['kinematics', 'counterweight', 'belts'].includes(currentView);
-    const y = beltColoring || ['yaxis', 'belts'].includes(currentView);
+    const xz = ['kinematics', 'counterweight', 'belts'].includes(currentView);
+    const y = ['yaxis', 'belts'].includes(currentView);
     beltMat.a.color.set(css('--motor-a')).convertSRGBToLinear();
     beltMat.b.color.set(css('--motor-b')).convertSRGBToLinear();
     beltMat.y.color.set(css('--y-axis')).convertSRGBToLinear();
@@ -336,6 +365,7 @@
     return glowCache.get(mat);
   }
   function applyFocus(objs, highlight) {
+    lastFocus = { objs, highlight };
     const keep = new Set();
     objs.forEach((o) => o.traverse((c) => c.isMesh && keep.add(c)));
     const all = objs.length === 0;
@@ -354,44 +384,64 @@
   function followOffset(v) {
     return v.follow ? F(pose.x, 0, pose.z) : new THREE.Vector3();
   }
+  // The preset cameras were framed for a stage about 0.75 wide per unit height; back off on narrower stages.
+  const REF_ASPECT = 0.75;
   function view(name, instant) {
     const v = VIEWS[name];
     if (!v) return;
+    // re-entering the current view (widget hover, same-view scroll) must not throw away the reader's orbit
+    if (root && name === currentView && !instant && !shown) return;
     currentView = name;
+    shown = false;
     labelEl.textContent = v.label;
+    pickEl.hidden = true;
     if (!root) return;
     setHidden(v.hide);
     applyFocus(v.focus ? matching(v.focus) : []);
     paintBelts();
     const off = followOffset(v);
-    const pos = F(...v.cam).add(off), at = F(...v.at).add(off);
+    const at = F(...v.at).add(off);
+    const pos = F(...v.cam).add(off).sub(at).multiplyScalar(Math.max(1, REF_ASPECT / camera.aspect)).add(at);
     if (instant) { camera.position.copy(pos); controls.target.copy(at); requestRender(); }
     else flyTo(pos, at);
   }
 
   // Focus arbitrary parts by name (BOM rows): ghost the rest and frame them.
   function show(substrs, label) {
-    if (!root) return;
+    if (!root) { readyCbs.push(() => show(substrs, label)); return; }
     const objs = matching(substrs).filter((o) => !HIDE_ALWAYS.includes(o.userData.fname));
     if (!objs.length) return;
+    shown = true;
+    pickEl.hidden = true;
     setHidden(GROUPS_HIDDEN_OPEN.filter((g) => !substrs.some((s) => g.includes(s))));
     applyFocus(objs, true);
+    ghostBelts();
     const box = new THREE.Box3();
     objs.forEach((o) => box.expandByObject(o));
     const c = box.getCenter(new THREE.Vector3());
     const r = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 0.03);
     const dir = camera.position.clone().sub(controls.target).normalize();
-    const dist = r / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2)) * 1.6;
+    // fit the narrower of the two fields of view (a tall, thin stage is limited horizontally)
+    const halfV = THREE.MathUtils.degToRad(camera.fov / 2);
+    const half = Math.min(halfV, Math.atan(Math.tan(halfV) * camera.aspect));
+    const dist = r / Math.sin(half) * 1.6;
     labelEl.textContent = label || substrs.join(', ');
     flyTo(c.clone().addScaledVector(dir, dist), c);
   }
 
   // ---------- click to name a part ----------
   const ray = new THREE.Raycaster();
-  let down = null;
-  canvas.addEventListener('pointerdown', (e) => (down = [e.clientX, e.clientY]));
+  let down = null, multi = false;
+  const ptrs = new Set();
+  canvas.addEventListener('pointerdown', (e) => {
+    ptrs.add(e.pointerId);
+    if (ptrs.size === 1) { multi = false; down = [e.clientX, e.clientY]; } else multi = true; // pinch, not a tap
+  });
+  canvas.addEventListener('pointercancel', (e) => { ptrs.delete(e.pointerId); down = null; });
   canvas.addEventListener('pointerup', (e) => {
-    if (!root || !down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4) return;
+    ptrs.delete(e.pointerId);
+    if (multi || !root || !down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4) return;
+    if (coarse && !controls.enabled) armTouch(true);
     const r = canvas.getBoundingClientRect();
     ray.setFromCamera({ x: ((e.clientX - r.left) / r.width) * 2 - 1, y: -((e.clientY - r.top) / r.height) * 2 + 1 }, camera);
     // ghosted parts are see-through, so pick the first solid part behind them
@@ -412,21 +462,13 @@
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => root && applyTheme());
   new MutationObserver(() => root && applyTheme()).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 
-  function stub() {
-    const noop = () => {};
-    return { setPose: noop, getPose: () => ({ ...pose }), view: noop, show: noop, colorBelts: noop, onReady: noop, limits: LIMIT };
-  }
-
   window.SW = {
     setPose,
-    getPose: () => ({ ...pose }),
     view,
     show,
-    colorBelts(on) { beltColoring = on; if (root) { paintBelts(); requestRender(); } },
     onReady(cb) { root ? cb() : readyCbs.push(cb); },
-    limits: LIMIT,
   };
-  applyThemeEarly();
-  function applyThemeEarly() { scene.background = new THREE.Color(css('--stage')); requestRender(); }
+  scene.background = new THREE.Color(css('--stage'));
+  requestRender();
   load();
 })();

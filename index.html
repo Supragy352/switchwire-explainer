@@ -73,8 +73,14 @@ a { color: var(--accent); text-underline-offset: 2px; }
   border-bottom: 1px solid var(--line);
 }
 body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--stage); }
-.stage-wrap.is-collapsed { height: 3rem; min-height: 0; }
-.stage-wrap.is-collapsed canvas, .stage-wrap.is-collapsed .stage-hint, .stage-wrap.is-collapsed .stage-pick { visibility: hidden; }
+@media (max-width: 1099px) {
+  /* while a widget is on screen, shrink the band; the margin keeps the in-flow height so the page doesn't jump */
+  .stage-wrap { transition: height 0.25s ease, margin-bottom 0.25s ease; }
+  .stage-wrap.is-compact:not(.is-collapsed) { height: 26svh; min-height: 170px; margin-bottom: calc(max(42svh, 260px) - max(26svh, 170px)); }
+  .stage-wrap.is-collapsed { height: 3rem; min-height: 0; }
+  .stage-wrap.is-collapsed canvas, .stage-wrap.is-collapsed .stage-hint, .stage-wrap.is-collapsed .stage-pick { visibility: hidden; }
+}
+@media (max-width: 1099px) and (prefers-reduced-motion: reduce) { .stage-wrap { transition: none; } }
 #stage { position: absolute; inset: 0; }
 #stage canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
 #stage canvas:active { cursor: grabbing; }
@@ -97,6 +103,10 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .stage-status { top: 50%; right: 12px; text-align: center; transform: translateY(-50%); }
 .stage-hint { bottom: 0.6rem; right: 12px; }
 @media (max-width: 700px) { .stage-hint { display: none; } }
+/* touch: the hint says how to arm the model (one finger scrolls the page until you tap it) */
+@media (max-width: 700px) and (pointer: coarse) { .stage-hint { display: block; } }
+#stage.is-armed canvas { outline: 2px solid var(--accent); outline-offset: -2px; }
+#stage canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .stage-pick {
   bottom: 2.4rem; color: var(--ink); background: var(--surface);
   border: 1px solid var(--line); padding: 0.3rem 0.55rem; max-width: calc(100% - 24px);
@@ -151,6 +161,12 @@ code { background: var(--surface); border: 1px solid var(--line); padding: 0.05e
   color: var(--muted); background: none; border: 0; border-bottom: 1px dotted var(--muted); padding: 0; cursor: pointer;
 }
 .view-link:hover { color: var(--accent); border-color: var(--accent); }
+/* bigger touch targets without changing the layout: sliders get a taller hit box, small buttons an invisible halo */
+@media (pointer: coarse) {
+  input[type="range"] { height: 2.75rem; }
+  .view-link, td .show { position: relative; }
+  .view-link::after, td .show::after { content: ""; position: absolute; inset: -0.8rem -0.3rem; }
+}
 
 /* equations */
 .eq {
@@ -237,7 +253,7 @@ footer.colophon { font-size: var(--step--1); color: var(--muted); border-top: 1p
 <div class="layout">
   <aside class="stage-wrap" id="stage-wrap" aria-label="3D model of the Voron Switchwire">
     <div id="stage">
-      <canvas aria-label="Interactive 3D model. Drag to orbit, scroll or pinch to zoom, click a part to name it."></canvas>
+      <canvas tabindex="0" aria-label="Interactive 3D model. Drag to orbit, scroll or pinch to zoom, click a part to name it, arrow keys pan."></canvas>
       <div class="stage-bar">
         <span class="stage-label">Whole machine, panels off (S1)</span>
         <button class="stage-toggle" id="stage-toggle" aria-expanded="true" aria-controls="stage-wrap">Hide model</button>
@@ -319,7 +335,7 @@ footer.colophon { font-size: var(--step--1); color: var(--muted); border-top: 1p
           <div class="em"><dt>Nozzle ΔX</dt><dd id="cx-x">0 mm</dd></div>
           <div class="em"><dt>Gantry ΔZ</dt><dd id="cx-z">0 mm</dd></div>
         </dl>
-        <canvas aria-label="Nozzle position in the XZ plane, built from motor A's and motor B's contributions"></canvas>
+        <canvas role="img" aria-label="Nozzle position in the XZ plane, built from motor A's and motor B's contributions"></canvas>
         <p class="legend"><span><i style="background:var(--motor-a)"></i>Motor A belt</span><span><i style="background:var(--motor-b)"></i>Motor B belt</span><span><i style="background:var(--ink)"></i>Net nozzle move</span></p>
       </div>
 
@@ -453,7 +469,7 @@ footer.colophon { font-size: var(--step--1); color: var(--muted); border-top: 1p
       <h3 data-view="kinematics"><span class="num">4.5</span>Idlers</h3>
       <p>Idlers redirect the belt, either toothed (teeth facing the belt teeth) or smooth (running on the flat back). Most are flanged ball bearings, F695 and F623 being common, stacked or pressed into a toothed shell. The bearing carries twice the tension times the sine of half the wrap angle:</p>
       <div class="eq">F_{\text{bearing}} = 2T\sin\!\left(\frac{\theta}{2}\right)</div>
-      <p>At 180° that is <span class="tex">2T</span>: 60–80 N at 30–40 N of tension, well within a small bearing's rating but enough to show as wear on a poor bearing or a flexing shaft. Flanges keep the belt from walking off; a belt that always rubs one flange points to a misaligned pulley or idler. <button class="view-link" type="button" data-show="Upper Block - Left:1|Upper Block - Right:1" data-label="Upper idlers: paired F695 (S12)">Show the upper idlers</button></p>
+      <p>At 180° that is <span class="tex">2T</span>: about 18 N at ≈9 N of tension, the figure Voron's tuning guide gives for its A/B belts (110 Hz over a 150 mm span, about 2 lb, at the low end of the range), well within a small bearing's rating but enough to show as wear on a poor bearing or a flexing shaft. Flanges keep the belt from walking off; a belt that always rubs one flange points to a misaligned pulley or idler. <button class="view-link" type="button" data-show="Upper Block - Left:1|Upper Block - Right:1" data-label="Upper idlers: paired F695 (S12)">Show the upper idlers</button></p>
 
       <h3 data-view="belts"><span class="num">4.6</span>Belt clamps</h3>
       <p>Belt ends are clamped to the moving carriage by folding the belt over itself so the teeth interlock, then trapping it in a printed slot. The load passes in shear across many teeth instead of relying on friction. A loose clamp is a soft spring in series with the belt and lowers resonance far more than the belt itself. <button class="view-link" type="button" data-show="Y Belt Anchor:1" data-label="Y belt anchor, clamp and endstop (S13)">Show the Y belt clamp</button></p>
@@ -498,7 +514,7 @@ footer.colophon { font-size: var(--step--1); color: var(--muted); border-top: 1p
           <div class="em"><dt>Command increment</dt><dd id="ms-res">–</dd></div>
           <div class="em"><dt>Torque per microstep</dt><dd id="ms-pct">–</dd></div>
         </dl>
-        <canvas class="short" aria-label="Restoring torque for a one-microstep error, as a percentage of holding torque, by microstep setting"></canvas>
+        <canvas role="img" class="short" aria-label="Restoring torque for a one-microstep error, as a percentage of holding torque, by microstep setting"></canvas>
         <p class="note">Restoring torque for a one-microstep error, <span class="tex">\sin(90^\circ/m)</span> of holding torque. The official SKR configuration runs 32.</p>
       </div>
 
@@ -571,7 +587,7 @@ footer.colophon { font-size: var(--step--1); color: var(--muted); border-top: 1p
           <div><dt>Losses at target</dt><dd id="ht-loss">–</dd></div>
           <div><dt>Hottest it can get</dt><dd id="ht-max">–</dd></div>
         </dl>
-        <canvas aria-label="Bed temperature against time"></canvas>
+        <canvas role="img" aria-label="Bed temperature against time"></canvas>
         <p class="note">Raise the air temperature to see what an enclosure does. The model uses C = 610 J/K, 0.105 m² of convecting area and ε = 0.9 on the 0.0525 m² top face, the figures from the text; it ignores the PID overshoot and the bed's own temperature gradient.</p>
       </div>
 
@@ -774,8 +790,8 @@ footer.colophon { font-size: var(--step--1); color: var(--muted); border-top: 1p
           <div class="em"><dt>Natural frequency</dt><dd id="yr-fn">–</dd></div>
           <div class="em"><dt>Ripple spacing v / f_d</dt><dd id="yr-gap">–</dd></div>
         </dl>
-        <canvas id="yr-curve" aria-label="Y natural frequency against bed position"></canvas>
-        <canvas id="yr-wall" class="short" aria-label="Ringing printed into the wall after a corner"></canvas>
+        <canvas role="img" id="yr-curve" aria-label="Y natural frequency against bed position"></canvas>
+        <canvas role="img" id="yr-wall" class="short" aria-label="Ringing printed into the wall after a corner"></canvas>
         <p class="note">Belt-only model with a 600 mm loop. Real Y resonances measure 30–60 Hz because the belt is not the only spring: the motor mount flexes, the frame twists and the printer rocks on its feet. Drop EA and raise the mass to see that range.</p>
       </div>
       <p>Measured bed-slinger Y resonances are usually lower, often 30–60 Hz, because the lowest-frequency mode in series wins, which is why Section 3 cares so much about frame stiffness. The model still predicts something real: resonance shifts as the bed moves, so a single input-shaper frequency is a compromise.</p>
@@ -809,7 +825,7 @@ footer.colophon { font-size: var(--step--1); color: var(--muted); border-top: 1p
           <div class="em"><dt>Vibration left</dt><dd id="sh-resid">–</dd></div>
           <div><dt>Corner smeared over</dt><dd id="sh-dt">–</dd></div>
         </dl>
-        <canvas aria-label="Nozzle error after a corner, unshaped and shaped"></canvas>
+        <canvas role="img" aria-label="Nozzle error after a corner, unshaped and shaped"></canvas>
         <p class="legend"><span><i style="background:var(--bar)"></i>Unshaped</span><span><i style="background:var(--accent)"></i>Shaped</span></p>
         <p class="note">Detune the shaper from the real f_n to see why robustness matters: the bed's f_n moves with its position and with the part's mass. ZVD tolerates more error than ZV but spreads each corner over a full period.</p>
       </div>
@@ -937,6 +953,7 @@ footer.colophon { font-size: var(--step--1); color: var(--muted); border-top: 1p
         <li><a href="https://github.com/VoronDesign/Voron-Switchwire" target="_blank" rel="noopener">Voron Switchwire repository</a>: assembly manual (<code>Manuals/Assembly_Manual_SW.pdf</code>, January 2025), CAD STEP assembly, panel DXFs, Klipper configs for SKR Mini E3 V2, V3 and Einsy Rambo</li>
         <li><a href="https://github.com/VoronDesign/Voron-Documentation" target="_blank" rel="noopener">Voron Documentation repository</a>: hardware, sourcing and mechanical pages</li>
         <li><a href="https://docs.vorondesign.com/" target="_blank" rel="noopener">Voron documentation site</a>: wiring guides and sourcing guide</li>
+        <li><a href="https://docs.vorondesign.com/tuning/secondary_printer_tuning.html" target="_blank" rel="noopener">Voron docs: secondary printer tuning</a>: A/B belt tension, 110 Hz over 150 mm ≈ 2 lb (not Switchwire-specific)</li>
         <li><a href="https://www.klipper3d.org/Resonance_Compensation.html" target="_blank" rel="noopener">Klipper: resonance compensation</a>: input shaper types and tuning</li>
       </ul>
       <p class="note">Not reachable for the source document: the official BOM generator at vorondesign.com/voron_switchwire. Confirm quantities there before ordering.</p>
@@ -977,12 +994,21 @@ footer.colophon { font-size: var(--step--1); color: var(--muted); border-top: 1p
         const r = el.getBoundingClientRect();
         if (r.top <= mid) best = el; else break;
       }
-      const v = (best || els[0]).dataset.view;
-      if (v !== current) { current = v; window.SW && window.SW.view(v); }
+      const el = best || els[0];
+      if (el !== current) { current = el; window.SW && window.SW.view(el.dataset.view); }
     }
     let raf = 0;
     addEventListener('scroll', () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(pick); }, { passive: true });
     window.SW && window.SW.onReady(pick);
+
+    // phones/tablets: shrink the model band while a widget is on screen
+    const widgets = [...document.querySelectorAll('[id^="w-"]')];
+    const onScreen = new Set();
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((e) => (e.isIntersecting ? onScreen.add(e.target) : onScreen.delete(e.target)));
+      document.getElementById('stage-wrap').classList.toggle('is-compact', onScreen.size > 0);
+    }, { rootMargin: '-50% 0px -15% 0px' });
+    widgets.forEach((w) => io.observe(w));
 
     const wrap = document.getElementById('stage-wrap'), btn = document.getElementById('stage-toggle');
     btn.addEventListener('click', () => {

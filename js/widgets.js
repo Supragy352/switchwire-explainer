@@ -11,8 +11,8 @@
   function setupCanvas(cv) {
     const r = cv.getBoundingClientRect();
     const dpr = Math.min(devicePixelRatio || 1, 2);
-    cv.width = Math.round(r.width * dpr);
-    cv.height = Math.round(r.height * dpr);
+    const W = Math.round(r.width * dpr), H = Math.round(r.height * dpr);
+    if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; } // reallocating on every slider tick churns memory
     const g = cv.getContext('2d');
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     return { g, w: r.width, h: r.height };
@@ -101,7 +101,12 @@
       let A = +a.value, B = +b.value;
       let X = (A + B) / 2, Z = (A - B) / 2;
       const Xc = Math.max(-LX, Math.min(LX, X)), Zc = Math.max(0, Math.min(LZ, Z));
-      if (Xc !== X || Zc !== Z) { X = Xc; Z = Zc; A = X + Z; B = X - Z; a.value = A; b.value = B; }
+      if (Xc !== X || Zc !== Z) {
+        a.value = Xc + Zc; b.value = Xc - Zc;
+        // the step=1 sliders round half values; recompute from what they now show so readouts agree
+        A = +a.value; B = +b.value;
+        X = Math.max(-LX, Math.min(LX, (A + B) / 2)); Z = Math.max(0, Math.min(LZ, (A - B) / 2));
+      }
       out(root, 'cx-a-out', `${A > 0 ? '+' : ''}${fmt(A)} mm`);
       out(root, 'cx-b-out', `${B > 0 ? '+' : ''}${fmt(B)} mm`);
       out(root, 'cx-x', `${fmt(X, 1)} mm`);
@@ -143,7 +148,6 @@
     root.addEventListener('pointerenter', () => window.SW && window.SW.view('kinematics'));
     bind(root, update);
     update();
-    if (window.SW) window.SW.onReady(update);
   })();
 
   // ============ 5.2 microstep torque + resolution ============
@@ -213,7 +217,8 @@
         if (tHit === null && T >= target) tHit = t;
         T += ((P - loss(T)) / C) * 2;
       }
-      out(root, 'ht-time', tHit === null ? 'never' : `${fmt(tHit / 60, 1)} min`);
+      // only 30 min are simulated: a bed whose steady state clears the target gets there, just later
+      out(root, 'ht-time', tHit !== null ? `${fmt(tHit / 60, 1)} min` : Tmax > target ? 'over 30 min' : 'never');
       out(root, 'ht-max', `${fmt(Tmax)} °C`);
       out(root, 'ht-loss', `${fmt(loss(target))} W`);
       const yTop = Math.max(140, Math.ceil((Math.max(target, Math.min(Tmax, 200)) + 10) / 20) * 20);
@@ -273,8 +278,12 @@
       out(root, 'yr-gap', `${fmt(v / fd, 2)} mm`);
       const pts = [];
       for (let L = 0.06; L <= 0.5401; L += 0.005) pts.push([L * 1000, fn(L)]);
+      // stiff belts or a light bed push f_n past 260 Hz; grow the axis so the curve and marker stay inside
+      const fTop = Math.max(260, Math.ceil((Math.max(f, ...pts.map((p) => p[1])) * 1.08) / 50) * 50);
+      const fStep = fTop > 300 ? 100 : 50;
       plot(cvF, {
-        x: [0, 600], y: [0, 260], xTicks: [0, 100, 200, 300, 400, 500, 600], yTicks: [0, 50, 100, 150, 200, 250],
+        x: [0, 600], y: [0, fTop], xTicks: [0, 100, 200, 300, 400, 500, 600],
+        yTicks: Array.from({ length: Math.floor(fTop / fStep) + 1 }, (_, i) => i * fStep),
         xLabel: 'Belt span from pulley to carriage, L₁ (mm)', yLabel: 'f_n (Hz)',
         series: [{ pts, color: css('--y-axis'), width: 2.5 }],
         marks: [{ x: L1 * 1000, y: f, color: css('--ink'), label: `${fmt(f)} Hz` }],
@@ -283,7 +292,8 @@
       const sMax = 20; // mm of wall shown
       const wpts = [];
       const wn = TAU * f, wd = TAU * fd;
-      for (let s = 0; s <= sMax; s += 0.02) {
+      const ds = Math.min(0.02, v / fd / 20); // ≥20 samples per ripple, or fast ringing aliases into noise
+      for (let s = 0; s <= sMax; s += ds) {
         const t = s / v;
         wpts.push([s, Math.exp(-zeta * wn * t) * Math.sin(wd * t)]);
       }
@@ -301,7 +311,6 @@
     root.addEventListener('pointerenter', () => window.SW && window.SW.view('yaxis'));
     bind(root, update);
     update();
-    if (window.SW) window.SW.onReady(update);
   })();
 
   // ============ 9.5 input shaper ============
@@ -328,7 +337,7 @@
       out(root, 'sh-fs-out', `${fmt(fs)} Hz`);
       const wn = TAU * fn, wd = wn * Math.sqrt(1 - zeta * zeta);
       const h = (t) => (t < 0 ? 0 : Math.exp(-zeta * wn * t) * Math.sin(wd * t));
-      const imp = impulses(type, fs, Math.min(zeta, 0.3));
+      const imp = impulses(type, fs, zeta);
       const tEnd = imp[imp.length - 1][1];
       const raw = [], shaped = [];
       let peakRaw = 0, resid = 0;
@@ -360,6 +369,8 @@
 
   // ============ BOM "show in model" + subsystem cards ============
   document.querySelectorAll('[data-show]').forEach((el) => {
+    // 38 table buttons all read "Show"; give screen readers the part name
+    if (el.textContent.trim() === 'Show') el.setAttribute('aria-label', `Show ${el.dataset.label || el.dataset.show} in the 3D model`);
     el.addEventListener('click', () => {
       if (!window.SW) return;
       // the stage is sticky, so it is already on screen; only reopen it if the reader collapsed it
